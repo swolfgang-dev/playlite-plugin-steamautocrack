@@ -43,3 +43,9 @@ Playlite installed. Native executables are not bundled in the SteamAutoCrack
 plugin; its separate tool installer downloads/builds them when requested.
 
 See [native tools and upstream licensing](NATIVE_TOOLS.md).
+
+## Distribution
+
+Packages are published separately to `swolfgang-dev/playlite-plugin-steamautocrack-releases`. Its visibility controls anonymous browsing and downloads independently of this private development repository.
+
+After updating the manifest version, publish with `python3 tools/publish_distribution.py vVERSION` using your authenticated GitHub CLI. For automatic publishing on version tags, configure the repository Actions secret `PLUGIN_DISTRIBUTION_TOKEN` with a fine-grained token granting Contents read/write access to the distribution repository. The workflow never changes repository visibility.

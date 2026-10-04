@@ -7,5 +7,6 @@
   "enabled": true,
   "repository": "swolfgang-dev/playlite-plugin-steamautocrack",
   "minimum_playlite_version": "0.2.0",
-  "description": "Native Linux emulator configuration and original Steamless unpackers."
+  "description": "Native Linux emulator configuration and original Steamless unpackers.",
+  "distribution_repository": "swolfgang-dev/playlite-plugin-steamautocrack-releases"
 }

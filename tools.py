@@ -1,4 +1,6 @@
 """Install native tools privately; upstream sources remain unchanged."""
+import fcntl
+import uuid
 import hashlib
 import json
 import os
@@ -67,7 +69,42 @@ def extract_tar(archive, destination):
             source.extractall(destination)
 
 
+def promote(root, prepared, commit=lambda: None):
+    """Replace a set of tools together, retaining old versions until commit succeeds."""
+    previous = {}
+    promoted = []
+    try:
+        for name, source in prepared.items():
+            target = root / name
+            if target.exists():
+                old = root / (name + '.previous-' + uuid.uuid4().hex)
+                target.rename(old)
+                previous[name] = old
+            source.rename(target)
+            promoted.append(name)
+        commit()
+    except Exception:
+        for name in reversed(promoted):
+            shutil.rmtree(root / name)
+        for name, old in previous.items():
+            old.rename(root / name)
+        raise
+    for old in previous.values():
+        shutil.rmtree(old, ignore_errors=True)
+
+
 def install(check=lambda: None, status=lambda text: None, root=TOOLS):
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / '.setup.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('Another native tool installation is already running.') from None
+        return _install(check, status, root)
+
+
+def _install(check, status, root):
     machine = platform.machine().lower()
     rid = {'x86_64': 'linux-x64', 'amd64': 'linux-x64', 'aarch64': 'linux-arm64'}.get(machine)
     if not rid:
@@ -98,7 +135,7 @@ def install(check=lambda: None, status=lambda text: None, root=TOOLS):
             extracted.mkdir()
             extract_tar(archive, extracted)
             check()
-            extracted.rename(root / 'dotnet')
+            promote(root, {'dotnet': extracted})
         status('Downloading original Steamless sources…')
         archive = stage / 'source.zip'
         download(f'https://codeload.github.com/SteamAutoCracks/Steam-auto-crack/zip/{SOURCE_COMMIT}', archive, check)
@@ -158,16 +195,8 @@ def install(check=lambda: None, status=lambda text: None, root=TOOLS):
                         raise ValueError('Emulator archive contains unsupported links.')
                 run_command([sevenzip, 'x', str(archive), '-o' + str(destination), '-y'], check)
         check()
-        for name, prepared in [('unpacker', output), ('emulator', emulator)]:
-            target = root / name
-            old = root / (name + '.previous')
-            if old.exists():
-                shutil.rmtree(old)
-            if target.exists():
-                target.rename(old)
-            prepared.rename(target)
-            if old.exists():
-                shutil.rmtree(old)
-        atomic_json(root / 'versions.json', dict(SteamlessSource=SOURCE_COMMIT, Emulator=release['tag_name']))
+        promote(root, {'unpacker': output, 'emulator': emulator},
+                lambda: atomic_json(root / 'versions.json',
+                                    dict(SteamlessSource=SOURCE_COMMIT, Emulator=release['tag_name'])))
         status('Native tools installed. No Wine prefix or Windows CLI is required.')
     return dict(EmulatorDirectory=str(root / 'emulator'), UnpackerPath=str(root / 'unpacker/steamless'))

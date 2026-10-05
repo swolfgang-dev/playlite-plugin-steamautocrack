@@ -158,7 +158,12 @@ def restore(root, check, status):
         path = checked_path(root, entry['path'])
         if entry.get('backup'):
             path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backup / entry['backup'], path)
+            temporary = path.with_name(path.name + '.playlite-restore-tmp')
+            try:
+                shutil.copy2(backup / entry['backup'], temporary)
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
         else:
             path.unlink(missing_ok=True)
     shutil.rmtree(backup)

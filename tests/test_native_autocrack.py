@@ -89,6 +89,26 @@ class NativeProcessingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'verification failed'):
             process(dict(InstallDirectory=str(self.game), Restore=True))
 
+    def test_failed_restore_copy_preserves_applied_file_and_can_retry(self):
+        import shutil
+        original = self.api.read_bytes()
+        process(self.request)
+        applied = self.api.read_bytes()
+        copy = shutil.copy2
+        def interrupted(source, destination, *args, **kwargs):
+            if Path(source).name == 'original-0':
+                Path(destination).write_bytes(b'partial copy')
+                raise OSError('simulated disk error')
+            return copy(source, destination, *args, **kwargs)
+        with patch('playlite_plugins.steamautocrack.engine.shutil.copy2', side_effect=interrupted):
+            with self.assertRaises(OSError):
+                process(dict(InstallDirectory=str(self.game), Restore=True))
+        self.assertEqual(self.api.read_bytes(), applied)
+        self.assertTrue((self.game / BACKUP / 'manifest.json').is_file())
+        self.assertFalse(list(self.game.rglob('*.playlite-restore-tmp')))
+        process(dict(InstallDirectory=str(self.game), Restore=True))
+        self.assertEqual(self.api.read_bytes(), original)
+
     def test_mismatched_architecture_symlinks_and_missing_unpacker_keep_files(self):
         (self.emulator / self.api.name).write_bytes(pe(bits=32))
         with self.assertRaisesRegex(ValueError, '64-bit emulator'):

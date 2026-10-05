@@ -37,9 +37,8 @@ plugins required by a test, then run:
 QT_QPA_PLATFORM=offscreen python3 -m unittest discover -s tests -q
 ```
 
-Tests requiring absent plugins are skipped. The release workflow checks Python
-syntax and builds the standalone archive; integration tests run locally with
-Playlite installed. Native executables are not bundled in the SteamAutoCrack
+Tests requiring absent plugins are skipped. CI installs Playlite and plugin fixtures into isolated data folders, runs the
+plugin tests, and builds the standalone archive before publishing. Native executables are not bundled in the SteamAutoCrack
 plugin; its separate tool installer downloads/builds them when requested.
 
 See [native tools and upstream licensing](NATIVE_TOOLS.md).
@@ -47,3 +46,5 @@ See [native tools and upstream licensing](NATIVE_TOOLS.md).
 ## Distribution
 
 Packages are published directly as GitHub releases in this source repository. Tag the manifest version (for example, `v2.0.2`) to build and publish `plugin.zip` and its checksums automatically.
+
+Native tool setup prevents concurrent installations and rolls back both tools if promotion or version metadata fails. Original-file restoration replaces each file atomically so a failed copy leaves the current file intact and the backups available for a retry.

@@ -48,3 +48,5 @@ See [native tools and upstream licensing](NATIVE_TOOLS.md).
 Packages are published directly as GitHub releases in this source repository. Tag the manifest version (for example, `v2.0.2`) to build and publish `plugin.zip` and its checksums automatically.
 
 Native tool setup prevents concurrent installations and rolls back both tools if promotion or version metadata fails. Original-file restoration replaces each file atomically so a failed copy leaves the current file intact and the backups available for a retry.
+
+Ctrl-click or Shift-click games in either library view, then right-click to run SteamAutoCrack or restore originals for the selection. One confirmation starts a sequential queue, with per-game results. Cancellation stops the queue after safely cancelling the active game. Archived games are excluded. Requires Playlite 0.2.23 for selection actions.

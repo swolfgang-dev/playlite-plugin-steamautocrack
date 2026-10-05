@@ -227,3 +227,33 @@ class Plugin(GenericPlugin):
             run_dialog(SteamProgress(request, window))
         except (ValueError, OSError) as error:
             show_warning(window, 'Cannot run SteamAutoCrack', str(error))
+
+
+    def batch_game_actions(self, window, games):
+        eligible = [dict(game) for game in games if game.get('InstallDirectory') and not game.get('ArchivePath')]
+        actions = []
+        if eligible:
+            actions.append((f'Run for {len(eligible)} games…', lambda: self.run_games(window, eligible)))
+        recoverable = [game for game in eligible if (Path(game['InstallDirectory']) / '.playlite-steamautocrack/manifest.json').is_file()]
+        if recoverable:
+            actions.append((f'Restore originals for {len(recoverable)} games…', lambda: self.run_games(window, recoverable, True)))
+        return actions
+
+    def run_games(self, window, games, restore=False):
+        from .progress import SteamBatchProgress
+        from PyQt6.QtWidgets import QMessageBox
+        title = 'Restore originals' if restore else 'SteamAutoCrack'
+        if QMessageBox.question(window, title, f'{title} for {len(games)} selected games?') != QMessageBox.StandardButton.Yes:
+            return
+        jobs, failures = [], []
+        for game in games:
+            try:
+                self.ensure_stopped(window, game)
+                request = dict(InstallDirectory=game['InstallDirectory'], Restore=True) if restore else self.request(game)
+                jobs.append((game, request))
+            except (ValueError, OSError) as error:
+                failures.append(game['Name'] + ': ' + str(error))
+        if failures:
+            show_warning(window, 'Skipped games', '\n'.join(failures))
+        if jobs:
+            run_dialog(SteamBatchProgress(jobs, window, preflight=lambda game: self.ensure_stopped(window, game)))

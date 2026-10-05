@@ -147,7 +147,7 @@ class NativeProcessingTests(unittest.TestCase):
         (data / 'library.json').write_text(json.dumps([game]))
         with (self.game / '.playlite-steamautocrack.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            with self.assertRaisesRegex(ValueError, 'processing operation'):
+            with self.assertRaisesRegex(ValueError, 'modifying this game'):
                 transfer_game(data, game, self.root / 'archive')
         self.assertTrue(self.api.exists())
         self.assertFalse((self.root / 'archive').exists())

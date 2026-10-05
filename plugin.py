@@ -2,7 +2,7 @@ import getpass
 import re
 from pathlib import Path
 from PyQt6.QtWidgets import QCheckBox, QLineEdit, QDialog, QVBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import QSettings, QThreadPool
+from PyQt6.QtCore import QSettings, QThreadPool, Qt
 from playlite.providers import GenericPlugin
 from playlite.lifecycle import run_dialog, show_warning, choose_directory, choose_file
 from .tools import TOOLS
@@ -68,7 +68,11 @@ class Plugin(GenericPlugin):
         form.addRow(widget.unpack)
         install = QPushButton('Install / update native tools…')
         install.clicked.connect(lambda: self.install_tools(widget))
-        form.addRow(install)
+        install_row = QHBoxLayout()
+        install_row.addStretch()
+        install_row.addWidget(install)
+        install_row.addStretch()
+        form.addRow(install_row)
         description = QLabel('Runs natively on Linux. Tool setup downloads emulator libraries and builds the original 32-bit and 64-bit Steamless unpackers with a private Linux .NET SDK. Original game files are backed up for restoration.')
         description.setWordWrap(True)
         form.addRow(description)
@@ -84,12 +88,16 @@ class Plugin(GenericPlugin):
         cancel = threading.Event()
         dialog = QDialog(widget)
         dialog.setWindowTitle('Set up native SteamAutoCrack tools')
+        dialog.setMinimumSize(640, 160)
+        dialog.resize(760, 200)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
         label = QLabel('Setting up native tools…')
         label.setWordWrap(True)
-        layout.addWidget(label)
+        layout.addWidget(label, 1)
         button = QPushButton('Cancel')
-        layout.addWidget(button)
+        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
         button.clicked.connect(lambda: (cancel.set(), button.setEnabled(False), label.setText('Cancelling…')))
         def check():
             if cancel.is_set():

@@ -1,12 +1,23 @@
 {
   "id": "SteamAutoCrack",
   "name": "SteamAutoCrack",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "api_version": 1,
   "type": "generic",
   "enabled": true,
   "repository": "swolfgang-dev/playlite-plugin-steamautocrack",
-  "minimum_playlite_version": "0.2.42",
+  "minimum_playlite_version": "0.2.44",
   "description": "Native Linux emulator configuration and original Steamless unpackers.",
-  "installation_hooks": true
+  "installation_hooks": true,
+  "settings_groups": [
+    "SteamAutoCrack"
+  ],
+  "game_fields": [
+    {
+      "key": "SteamId",
+      "label": "Steam ID",
+      "metadata_provider": "SteamMetadata",
+      "positive_id": true
+    }
+  ]
 }

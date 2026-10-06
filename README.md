@@ -8,6 +8,8 @@ Requires Playlite 0.2.0 or later, plugin API 1.
 
 ## Installation
 
+Installing the plugin through Playlite automatically starts native tool setup. Progress and cancellation are available in the setup window. Successful setup saves the tool paths; you can retry or update using **Install / update native tools** in plugin settings.
+
 Install from the public GitHub release:
 
 ```sh

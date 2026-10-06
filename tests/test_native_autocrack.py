@@ -1,5 +1,5 @@
 from plugin_test_support import require_plugin
-require_plugin('PlayliteArchiver')
+require_plugin('GameArchiver')
 require_plugin('SteamAutoCrack')
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
@@ -140,7 +140,7 @@ class NativeProcessingTests(unittest.TestCase):
 
     def test_archiver_cannot_move_a_game_being_processed(self):
         import fcntl
-        from playlite_plugins.playlitearchiver.transfer import transfer_game
+        from playlite_plugins.gamearchiver.transfer import transfer_game
         data = self.root / 'library'
         data.mkdir()
         game = dict(Id='a', Name='Example', InstallDirectory=str(self.game))
@@ -197,6 +197,6 @@ class NativeProcessingTests(unittest.TestCase):
         settings.setValue('emulatorDirectory', str(self.root / 'emulator'))
         plugin.settings = lambda: settings
         self.assertFalse(plugin.default_for('Manual'))
-        request = plugin.request(dict(InstallDirectory=str(self.game), MetadataIds={'Steam': '123'}))
+        request = plugin.request(dict(InstallDirectory=str(self.game), MetadataIds={'SteamMetadata': '123'}))
         self.assertEqual(request['AppId'], '123')
         self.assertEqual(request['EmulatorDirectory'], str(self.root / 'emulator'))

@@ -11,6 +11,18 @@ from .tools import TOOLS
 class Plugin(GenericPlugin):
     settings_group = 'installation'
 
+    def post_install(self, parent=None):
+        widget = self.create_settings(parent)
+        try:
+            result = self.install_tools(widget)
+            if result:
+                settings = self.settings()
+                settings.setValue('emulatorDirectory', result['EmulatorDirectory'])
+                settings.setValue('unpackerPath', result['UnpackerPath'])
+                settings.sync()
+        finally:
+            widget.deleteLater()
+
     def settings(self):
         return QSettings('Playlite', 'SteamAutoCrack')
 
@@ -86,6 +98,7 @@ class Plugin(GenericPlugin):
         class Updates(QObject):
             progress = pyqtSignal(str)
         cancel = threading.Event()
+        installed = []
         dialog = QDialog(widget)
         dialog.setWindowTitle('Set up native SteamAutoCrack tools')
         dialog.setMinimumSize(640, 160)
@@ -106,6 +119,7 @@ class Plugin(GenericPlugin):
         updates.progress.connect(label.setText)
         task = Task(lambda: install(check=check, status=updates.progress.emit))
         def complete(result):
+            installed.append(result)
             widget.emulator.setText(result['EmulatorDirectory'])
             widget.unpacker.setText(result['UnpackerPath'])
             dialog.accept()
@@ -119,6 +133,7 @@ class Plugin(GenericPlugin):
         dialog.task = task
         QThreadPool.globalInstance().start(task)
         run_dialog(dialog)
+        return installed[0] if installed else None
 
     def save_settings(self, widget):
         if not widget.username.text().strip() or any(c in widget.username.text() for c in '\r\n\0'):
@@ -167,7 +182,7 @@ class Plugin(GenericPlugin):
 
     def request(self, game, key=''):
         settings = self.settings()
-        appid = (game.get('MetadataIds') or {}).get('Steam') or next((match.group(1) for link in game.get('Links', [])
+        appid = (game.get('MetadataIds') or {}).get('SteamMetadata') or next((match.group(1) for link in game.get('Links', [])
             if (match := re.search(r'https?://store\.steampowered\.com/app/(\d+)', link.get('Url', '')))), None)
         if not appid or not str(appid).isascii() or not str(appid).isdigit() or not 0 < int(appid) <= 4294967295:
             raise ValueError('Set the Steam metadata ID before running SteamAutoCrack.')

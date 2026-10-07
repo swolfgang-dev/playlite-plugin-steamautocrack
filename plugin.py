@@ -172,6 +172,8 @@ class Plugin(GenericPlugin):
         settings.sync()
 
     def augment_add_editor(self, editor):
+        if getattr(editor, 'editor_purpose', None) == 'play_action':
+            return
         editor.autocrack = QCheckBox('Run SteamAutoCrack after adding')
         method = getattr(editor, 'installation_plugin', None)
         editor.autocrack.setChecked(self.default_for(method.id if method else 'Manual'))

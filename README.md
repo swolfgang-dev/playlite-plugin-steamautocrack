@@ -1,54 +1,74 @@
 # SteamAutoCrack for Playlite
 
-Native Linux emulator configuration and original Steamless unpackers.
+Process Windows games with the Windows SteamAutoCrack CLI inside the Steam
+Downloader VM. Playlite sends jobs through the QEMU guest agent; game files stay
+in the shared Steam library and are accessed as `S:\` inside Wine.
 
-This repository contains only this plugin. Playlite itself lives in
-[swolfgang-dev/Playlite](https://github.com/swolfgang-dev/Playlite).
-Requires Playlite 0.2.0 or later, plugin API 1.
+Requires Playlite 0.2.61 or later and Steam Downloader 0.1.11 or later.
 
-## Installation
+## Setup
 
-Installing the plugin through Playlite automatically starts native tool setup. Progress and cancellation are available in the setup window. Successful setup saves the tool paths; you can retry or update using **Install / update native tools** in plugin settings.
+1. Set up the Steam Downloader VM with Wine and Steam Auto Crack installed.
+2. Install this plugin and use **Set up / check VM CLI** in its settings.
+3. Choose the VM userdata folder. The current Playlite profile's Steam VM is
+   selected by default; another owned Steam VM can be selected explicitly.
+4. Set your emulator username and, for game-info generation, your Steam Web API
+   key. Game-info requests require the VM's connected VPN and kill switch.
 
-Install from the public GitHub release:
+The plugin installation hook offers CLI setup. Setup downloads checksum-verified
+.NET SDK and source archives inside the VM and builds upstream 3.5.1.0 for
+Windows x86. The Linux SDK is only a build tool in the guest; processing uses
+`SteamAutoCrack.CLI.exe` under Wine and the installed Windows .NET runtime.
+The CLI uses the GUI installation's Goldberg emulator libraries. The plugin
+contains no native Linux emulator processing or Steamless implementation.
 
-```sh
-playlite-plugins install swolfgang-dev/playlite-plugin-steamautocrack
-```
+The upstream release ZIP contains only the GUI. Its separate CLI project has
+three option-description constructor calls incompatible with its own
+System.CommandLine 2.0 dependency. The build recipe changes those descriptions
+to property initializers; game processing code remains upstream. Version,
+source commit, recipe revision, and the upstream license are retained in the
+VM CLI installation.
 
-Or choose Settings → Plugins → Installed → Install / update from GitHub.
-Restart Playlite after installation or updating. Settings and game data remain in
-Playlite's existing user-data folders. 
+## Processing and recovery
 
-## Releases
+Right-click an installed game and choose **SteamAutoCrack → Run**. Games must
+have a Steam metadata ID and be inside the selected VM's shared library.
+Archived games and game folders containing symlinks are excluded. Windows
+Steam API DLLs are required. Stop the game before modifying its files.
 
-Push a `v2.0.0`-style tag to run the release workflow. Each release
-contains `plugin.zip` and `SHA256SUMS`. The archive has `manifest.json` and
-`plugin.py` at its root; it never includes the base application.
+The existing **Run SteamAutoCrack after adding** option is retained. Ctrl-click
+or Shift-click games, then use the selection action to process a sequential
+batch with per-game results and cancellation.
 
-Build locally with `python3 tools/build_release.py`.
-The manifest declares any additional Python dependencies, installed into the
-same environment as Playlite.
+Before running the CLI, the guest saves verified copies of executable/library
+files and existing `steam_settings` content in
+`<game>/.playlite-steamautocrack/`. CLI errors, timeouts, and cancellation restore
+those originals and remove newly generated processing files. If recovery cannot finish,
+backups remain available. **Restore originals** refuses to overwrite files that
+changed after processing. Restore before processing the same game again.
+Legacy backups made by the native plugin remain recoverable, including games
+outside the shared VM library. Old native tool downloads are left in user data
+and are no longer used.
 
-## Tests
+Host and guest job files are private. API keys travel in bounded JSON through
+guest-agent stdin, are never command-line arguments, are redacted from progress
+logs, and are removed from temporary requests/configuration after each job.
+Processing failures are detected from both the CLI's exit code and its output,
+since upstream may log an error while returning zero.
 
-Plugin integration tests live in `tests/`. Install Playlite and the optional
-plugins required by a test, then run:
+## Development and distribution
+
+Build a standalone plugin archive with `python3 tools/build_release.py`.
+`dist/plugin.zip` includes the VM adapter and guest worker/setup recipes.
+Install/update from this archive in Playlite, then restart Playlite.
+Tag the manifest version (`v3.0.0`) to publish through the release workflow.
+
+With Playlite and PyQt6 available, run:
 
 ```sh
 QT_QPA_PLATFORM=offscreen python3 -m unittest discover -s tests -q
 ```
 
-Tests requiring absent plugins are skipped. CI installs Playlite and plugin fixtures into isolated data folders, runs the
-plugin tests, and builds the standalone archive before publishing. Native executables are not bundled in the SteamAutoCrack
-plugin; its separate tool installer downloads/builds them when requested.
-
-See [native tools and upstream licensing](NATIVE_TOOLS.md).
-
-## Distribution
-
-Packages are published directly as GitHub releases in this source repository. Tag the manifest version (for example, `v2.0.2`) to build and publish `plugin.zip` and its checksums automatically.
-
-Native tool setup prevents concurrent installations and rolls back both tools if promotion or version metadata fails. Original-file restoration replaces each file atomically so a failed copy leaves the current file intact and the backups available for a retry.
-
-Ctrl-click or Shift-click games in either library view, then right-click to run SteamAutoCrack or restore originals for the selection. One confirmation starts a sequential queue, with per-game results. Cancellation stops the queue after safely cancelling the active game. Archived games are excluded. Requires Playlite 0.2.23 for selection actions.
+Tests load the current checkout and cover VM path mapping, job submission,
+cancellation, credential redaction, CLI failure detection, rollback, legacy
+restoration, settings migration, and sequential batch progress.

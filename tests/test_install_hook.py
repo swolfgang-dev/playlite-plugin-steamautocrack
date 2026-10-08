@@ -1,39 +1,45 @@
-import importlib.util
 import json
-import sys
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
-ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('autocrack_install_test', ROOT / 'plugin.py', submodule_search_locations=[str(ROOT)])
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
+from source_support import ROOT
+from autocrack_source.plugin import Plugin
+
 APP = QApplication.instance() or QApplication([])
 
+
 class InstallHookTests(unittest.TestCase):
-    def test_setup_saves_only_tool_paths(self):
-        self.assertTrue(json.loads((ROOT / 'manifest.json').read_text())['installation_hooks'])
+    def test_install_hook_uses_vm_setup_and_preserves_preferences(self):
+        manifest = json.loads((ROOT / 'manifest.json').read_text())
+        self.assertTrue(manifest['installation_hooks'])
+        self.assertEqual(manifest['plugin_dependencies'][0]['id'], 'SteamDepotDownloader')
         with tempfile.TemporaryDirectory() as folder:
             settings = QSettings(str(Path(folder) / 'settings.ini'), QSettings.Format.IniFormat)
             settings.setValue('username', 'Player')
-            plugin = module.Plugin()
-            result = dict(EmulatorDirectory='/private/emulator', UnpackerPath='/private/steamless')
-            with patch.object(plugin, 'settings', return_value=settings), patch.object(plugin, 'install_tools', return_value=result) as install:
+            plugin = Plugin()
+            with patch.object(plugin, 'settings', return_value=settings), patch.object(plugin, 'setup_vm') as setup:
                 plugin.post_install()
-            install.assert_called_once()
-            self.assertEqual(settings.value('emulatorDirectory'), result['EmulatorDirectory'])
-            self.assertEqual(settings.value('unpackerPath'), result['UnpackerPath'])
+            setup.assert_called_once()
             self.assertEqual(settings.value('username'), 'Player')
 
-    def test_cancel_preserves_settings(self):
+    def test_settings_replace_native_paths_and_migrate_only_obsolete_keys(self):
         with tempfile.TemporaryDirectory() as folder:
             settings = QSettings(str(Path(folder) / 'settings.ini'), QSettings.Format.IniFormat)
-            settings.setValue('emulatorDirectory', '/existing/emulator')
-            plugin = module.Plugin()
-            with patch.object(plugin, 'settings', return_value=settings), patch.object(plugin, 'install_tools', return_value=None):
-                plugin.post_install()
-            self.assertEqual(settings.value('emulatorDirectory'), '/existing/emulator')
+            settings.setValue('emulatorDirectory', '/old/tools')
+            settings.setValue('unpackerPath', '/old/unpacker')
+            settings.setValue('runOnAdd/Manual', True)
+            plugin = Plugin()
+            with patch.object(plugin, 'settings', return_value=settings):
+                widget = plugin.create_settings()
+                self.assertFalse(hasattr(widget, 'emulator'))
+                self.assertFalse(hasattr(widget, 'unpacker'))
+                widget.vm_root.setText('/private/steam-vm')
+                plugin.save_settings(widget)
+                widget.deleteLater()
+            self.assertEqual(settings.value('vmRoot'), '/private/steam-vm')
+            self.assertFalse(settings.contains('emulatorDirectory'))
+            self.assertFalse(settings.contains('unpackerPath'))
+            self.assertTrue(settings.value('runOnAdd/Manual', type=bool))

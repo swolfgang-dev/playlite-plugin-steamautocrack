@@ -1,13 +1,13 @@
 {
   "id": "SteamAutoCrack",
   "name": "SteamAutoCrack",
-  "version": "2.0.8",
+  "version": "3.0.0",
   "api_version": 1,
   "type": "generic",
   "enabled": true,
   "repository": "swolfgang-dev/playlite-plugin-steamautocrack",
-  "minimum_playlite_version": "0.2.44",
-  "description": "Native Linux emulator configuration and original Steamless unpackers.",
+  "minimum_playlite_version": "0.2.61",
+  "description": "Process shared Windows games with the SteamAutoCrack CLI inside the Steam Downloader VM.",
   "installation_hooks": true,
   "settings_groups": [
     "SteamAutoCrack"
@@ -18,6 +18,13 @@
       "label": "Steam ID",
       "metadata_provider": "SteamMetadata",
       "positive_id": true
+    }
+  ],
+  "plugin_dependencies": [
+    {
+      "id": "SteamDepotDownloader",
+      "repository": "swolfgang-dev/playlite-plugin-steam-depot-downloader",
+      "minimum_version": "0.1.11"
     }
   ]
 }

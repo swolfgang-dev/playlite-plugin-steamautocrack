@@ -4,8 +4,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import QCheckBox, QLineEdit, QDialog, QVBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import QSettings, QThreadPool, Qt
 from playlite.providers import GenericPlugin
-from playlite.lifecycle import run_dialog, show_warning, choose_directory, choose_file
-from .tools import TOOLS
+from playlite.lifecycle import run_dialog, show_warning, choose_directory
+from .vm_backend import default_root
 
 
 class Plugin(GenericPlugin):
@@ -14,12 +14,7 @@ class Plugin(GenericPlugin):
     def post_install(self, parent=None):
         widget = self.create_settings(parent)
         try:
-            result = self.install_tools(widget)
-            if result:
-                settings = self.settings()
-                settings.setValue('emulatorDirectory', result['EmulatorDirectory'])
-                settings.setValue('unpackerPath', result['UnpackerPath'])
-                settings.sync()
+            self.setup_vm(widget)
         finally:
             widget.deleteLater()
 
@@ -56,43 +51,39 @@ class Plugin(GenericPlugin):
         widget.timeout = QSpinBox()
         widget.timeout.setRange(1, 120)
         widget.timeout.setValue(settings.value('timeout', 5, type=int))
-        widget.emulator = QLineEdit(settings.value('emulatorDirectory', str(TOOLS / 'emulator')))
-        widget.unpacker = QLineEdit(settings.value('unpackerPath', str(TOOLS / 'unpacker/steamless')))
+        widget.vm_root = QLineEdit(settings.value('vmRoot', str(default_root())))
         form.addRow('Emulator username', widget.username)
         form.addRow('Steam Web API key', widget.api_key)
         form.addRow('Timeout (minutes)', widget.timeout)
-        for title, field, folder in [('Emulator libraries', widget.emulator, True), ('Native unpacker', widget.unpacker, False)]:
-            row = QHBoxLayout()
-            row.addWidget(field)
-            browse = QPushButton('Browse…')
-            def pick(checked=False, field=field, folder=folder):
-                value = choose_directory(widget, 'Emulator libraries', field.text()) if folder else choose_file(widget, 'Native unpacker', field.text(), 'All files (*)')[0]
-                if value:
-                    field.setText(value)
-            browse.clicked.connect(pick)
-            row.addWidget(browse)
-            form.addRow(title, row)
+        row = QHBoxLayout()
+        row.addWidget(widget.vm_root)
+        browse = QPushButton('Browse…')
+        def pick():
+            value = choose_directory(widget, 'Steam VM userdata folder', widget.vm_root.text())
+            if value:
+                widget.vm_root.setText(value)
+        browse.clicked.connect(pick)
+        row.addWidget(browse)
+        form.addRow('Steam VM userdata', row)
         widget.generate_info = QCheckBox('Generate Steam achievements, stats, and DLC configuration')
         widget.generate_info.setChecked(settings.value('generateInfo', True, type=bool))
         widget.unpack = QCheckBox('Unpack SteamStub executables')
         widget.unpack.setChecked(settings.value('unpack', True, type=bool))
         form.addRow(widget.generate_info)
         form.addRow(widget.unpack)
-        install = QPushButton('Install / update native tools…')
-        install.clicked.connect(lambda: self.install_tools(widget))
-        install_row = QHBoxLayout()
-        install_row.addStretch()
-        install_row.addWidget(install)
-        install_row.addStretch()
-        form.addRow(install_row)
-        description = QLabel('Runs natively on Linux. Tool setup downloads emulator libraries and builds the original 32-bit and 64-bit Steamless unpackers with a private Linux .NET SDK. Original game files are backed up for restoration.')
+        setup = QPushButton('Set up / check VM CLI…')
+        setup.clicked.connect(lambda: self.setup_vm(widget))
+        form.addRow(setup)
+        description = QLabel('Runs the Windows SteamAutoCrack CLI through Wine in the Steam Downloader VM. '
+                             'Choose Windows games inside its shared Steam library. Original game files '
+                             'are backed up for restoration. Game-info requests use the VM VPN.')
         description.setWordWrap(True)
         form.addRow(description)
         return widget
 
-    def install_tools(self, widget):
+    def setup_vm(self, widget):
         import threading
-        from .tools import install
+        from .vm_backend import setup
         from playlite.metadata_dialog import Task
         from PyQt6.QtCore import QObject, pyqtSignal
         class Updates(QObject):
@@ -100,33 +91,26 @@ class Plugin(GenericPlugin):
         cancel = threading.Event()
         installed = []
         dialog = QDialog(widget)
-        dialog.setWindowTitle('Set up native SteamAutoCrack tools')
+        dialog.setWindowTitle('Set up SteamAutoCrack VM CLI')
         dialog.setMinimumSize(640, 160)
-        dialog.resize(760, 200)
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-        label = QLabel('Setting up native tools…')
+        label = QLabel('Preparing the Steam VM CLI…')
         label.setWordWrap(True)
-        layout.addWidget(label, 1)
+        layout.addWidget(label)
         button = QPushButton('Cancel')
         layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
         button.clicked.connect(lambda: (cancel.set(), button.setEnabled(False), label.setText('Cancelling…')))
-        def check():
-            if cancel.is_set():
-                raise ValueError('Tool setup cancelled.')
         updates = Updates(dialog)
         updates.progress.connect(label.setText)
-        task = Task(lambda: install(check=check, status=updates.progress.emit))
+        vm_root = widget.vm_root.text().strip()
+        task = Task(lambda: setup(vm_root, cancel.is_set, updates.progress.emit))
         def complete(result):
             installed.append(result)
-            widget.emulator.setText(result['EmulatorDirectory'])
-            widget.unpacker.setText(result['UnpackerPath'])
             dialog.accept()
         def failed(error):
             dialog.reject()
             if not cancel.is_set():
-                show_warning(widget, 'Native tool setup', error)
+                show_warning(widget, 'Steam VM CLI setup', error)
         task.signals.succeeded.connect(complete)
         task.signals.failed.connect(failed)
         dialog.finished.connect(lambda: cancel.set())
@@ -136,20 +120,21 @@ class Plugin(GenericPlugin):
         return installed[0] if installed else None
 
     def save_settings(self, widget):
-        if not widget.username.text().strip() or any(c in widget.username.text() for c in '\r\n\0'):
+        if not widget.username.text().strip() or len(widget.username.text().strip()) > 128 or any(c in widget.username.text() for c in '\r\n\0'):
             raise ValueError('Enter a valid emulator username.')
         key = widget.api_key.text().strip()
         if key and not re.fullmatch(r'[a-fA-F0-9]{32}', key):
             raise ValueError('Enter a valid Steam Web API key (32 hexadecimal characters), or leave it blank.')
-        for field in (widget.emulator, widget.unpacker):
-            if field.text().strip() and not Path(field.text().strip()).is_absolute():
-                raise ValueError('Native tool paths must be absolute Linux paths.')
+        vm_root = widget.vm_root.text().strip()
+        if not Path(vm_root).is_absolute() or any(c in vm_root for c in '\r\n\0'):
+            raise ValueError('Select an absolute Steam VM userdata folder.')
         settings = self.settings()
         for key, value in [('username', widget.username.text().strip()), ('timeout', widget.timeout.value()),
-                           ('apiKey', widget.api_key.text().strip()), ('emulatorDirectory', widget.emulator.text().strip()),
-                           ('unpackerPath', widget.unpacker.text().strip()), ('generateInfo', widget.generate_info.isChecked()),
-                           ('unpack', widget.unpack.isChecked())]:
+                           ('apiKey', widget.api_key.text().strip()), ('vmRoot', vm_root),
+                           ('generateInfo', widget.generate_info.isChecked()), ('unpack', widget.unpack.isChecked())]:
             settings.setValue(key, value)
+        for obsolete in ('emulatorDirectory', 'unpackerPath'):
+            settings.remove(obsolete)
         settings.sync()
         filename = Path(settings.fileName())
         if filename.is_file():
@@ -195,13 +180,20 @@ class Plugin(GenericPlugin):
         info = settings.value('generateInfo', True, type=bool)
         if info and not re.fullmatch(r'[a-fA-F0-9]{32}', key):
             raise ValueError('Set a Steam Web API key, or disable game-info generation in plugin settings.')
-        emulator = settings.value('emulatorDirectory', str(TOOLS / 'emulator'))
-        if not Path(emulator).is_dir():
-            raise ValueError('Install native tools or choose an emulator folder in plugin settings.')
-        return dict(InstallDirectory=str(root), AppId=str(appid), ApiKey=key, GenerateInfo=info,
+        from .vm_backend import Client, shared_game_path
+        vm_root = settings.value('vmRoot', str(default_root()))
+        client = Client(vm_root)
+        shared_game_path(root, client.cfg['shared'])
+        return dict(InstallDirectory=str(root), AppId=str(appid), ApiKey=key if info else '', GenerateInfo=info,
                     GenerateConfig=True, Unpack=settings.value('unpack', True, type=bool), ApplyEmulator=True,
-                    EmulatorDirectory=emulator, UnpackerPath=settings.value('unpackerPath', str(TOOLS / 'unpacker/steamless')),
-                    TimeoutMinutes=settings.value('timeout', 5, type=int), GoldbergUsername=settings.value('username', getpass.getuser()))
+                    VmRoot=vm_root, TimeoutMinutes=settings.value('timeout', 5, type=int),
+                    GoldbergUsername=settings.value('username', getpass.getuser()))
+
+    def restore_request(self, game):
+        settings = self.settings()
+        return dict(InstallDirectory=game['InstallDirectory'], Restore=True,
+                    VmRoot=settings.value('vmRoot', str(default_root())),
+                    TimeoutMinutes=settings.value('timeout', 5, type=int))
 
     def prepare_add(self, editor, game, registration):
         editor.steam_request = self.request(game) if editor.autocrack.isChecked() else None
@@ -237,7 +229,7 @@ class Plugin(GenericPlugin):
         from PyQt6.QtWidgets import QMessageBox
         try:
             self.ensure_stopped(window, game)
-            request = dict(InstallDirectory=game['InstallDirectory'], Restore=True) if restore else self.request(game)
+            request = self.restore_request(game) if restore else self.request(game)
             title = 'Restore originals' if restore else 'SteamAutoCrack'
             if QMessageBox.question(window, title, f'{title} for “{game["Name"]}”?') != QMessageBox.StandardButton.Yes:
                 return
@@ -266,7 +258,7 @@ class Plugin(GenericPlugin):
         for game in games:
             try:
                 self.ensure_stopped(window, game)
-                request = dict(InstallDirectory=game['InstallDirectory'], Restore=True) if restore else self.request(game)
+                request = self.restore_request(game) if restore else self.request(game)
                 jobs.append((game, request))
             except (ValueError, OSError) as error:
                 failures.append(game['Name'] + ': ' + str(error))

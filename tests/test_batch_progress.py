@@ -5,10 +5,8 @@ import unittest
 from unittest.mock import patch
 from PyQt6.QtCore import QProcess
 from PyQt6.QtWidgets import QApplication
-from playlite.providers import discover_plugins
-from plugin_test_support import require_plugin
-require_plugin('SteamAutoCrack')
-from playlite_plugins.steamautocrack.progress import SteamBatchProgress
+from source_support import ROOT
+from autocrack_source.progress import SteamBatchProgress
 
 APP = QApplication.instance() or QApplication([])
 
@@ -18,7 +16,7 @@ class BatchProgressTests(unittest.TestCase):
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.jobs = [(dict(Id=str(i), Name='Game ' + str(i)), dict(InstallDirectory='/games/' + str(i))) for i in range(3)]
-        self.private = patch('playlite_plugins.steamautocrack.runner.PRIVATE', Path(self.directory.name))
+        self.private = patch('autocrack_source.runner.PRIVATE', Path(self.directory.name))
         self.private.start()
         self.addCleanup(self.private.stop)
         self.start = patch.object(QProcess, 'start')

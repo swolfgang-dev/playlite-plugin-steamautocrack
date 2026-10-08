@@ -1,11 +1,11 @@
-"""Private subprocess entry point for the native plugin."""
+"""Private subprocess entry point for Steam VM CLI jobs."""
 import json
 import os
 from pathlib import Path
 import re
 import sys
 from playlite.storage import atomic_json
-from .engine import process
+from .vm_backend import process
 
 PRIVATE = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'playlite/steamautocrack'
 
@@ -23,8 +23,7 @@ def run(job):
     write_json(job / 'request.json', public)
     def status(message):
         (job / 'status.txt').write_text(message)
-    process(request, cancel=lambda: (job / 'cancel').exists(), status=status)
-    return dict(Success=True, Message='Processing complete. Originals are backed up and can be restored.')
+    return process(request, cancel=lambda: (job / 'cancel').exists(), status=status)
 
 
 def main():
@@ -37,7 +36,7 @@ def main():
     try:
         result = run(job)
     except Exception as error:
-        result = dict(Success=False, Message=str(error) if isinstance(error, ValueError) else 'Native processing failed. Original backups were retained when recovery was needed.')
+        result = dict(Success=False, Message=str(error) if isinstance(error, ValueError) else 'VM processing failed. Check the Steam VM; original backups were retained when recovery was needed.')
     finally:
         (job / 'request.json').unlink(missing_ok=True)
     write_json(job / 'result.json', result)

@@ -23,6 +23,11 @@ jobs:
         with:
           repository: swolfgang-dev/Playlite
           path: core
+      - uses: actions/checkout@v4
+        with:
+          repository: swolfgang-dev/playlite-plugin-crack-tools
+          ref: v0.1.0
+          path: playlite-plugin-crack-tools
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

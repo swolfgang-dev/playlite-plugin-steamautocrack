@@ -12,7 +12,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backup import BACKUP, LOCK, write_json, snapshot, finalize, restore
+from backup import BACKUP, LOCK, write_json, snapshot, finalize, restore, collect_cli_backups, collect_existing_settings, files, digest
 
 SHARED = Path('/mnt/standalone')
 PREFIX = Path.home() / '.local/share/playlite/wine-steam-auto-crack'
@@ -87,7 +87,7 @@ def run_cli(root, request, folder, check, status):
     output = ''
     pending = b''
     try:
-        process = subprocess.Popen(['wine', str(executable), 'crack', windows_path,
+        process = subprocess.Popen(['wine', str(executable), '--debug', 'crack', windows_path,
             '--config', config_path, '--appid', str(request['AppId'])], cwd=CLI, env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=True)
@@ -134,6 +134,27 @@ def run_cli(root, request, folder, check, status):
             process.stdout.close()
 
 
+def verify_applied(root, request, status):
+    for relative, path in files(root).items():
+        if path.name.lower() in ('steam_api.dll', 'steam_api64.dll'):
+            architecture = 'x64' if path.name.lower() == 'steam_api64.dll' else 'x86'
+            expected = CLI / 'Goldberg/regular' / architecture / path.name.lower()
+            if not expected.is_file() or digest(path) != digest(expected):
+                raise ValueError('Emulator DLL was not applied: ' + relative)
+            settings = path.parent / 'steam_settings'
+            if not (settings / 'steam_appid.txt').is_file() or not (settings / 'configs.user.ini').is_file():
+                raise ValueError('Emulator configuration was not applied: ' + relative)
+    if request.get('Unpack', True):
+        for relative, path in files(root).items():
+            if path.name.lower().endswith('.exe.bak'):
+                executable = path.with_suffix('')
+                if not executable.is_file() or digest(executable) == digest(path):
+                    raise ValueError('Unpacked executable was not applied: ' + relative)
+            if path.name.lower().endswith('.exe.unpacked.exe'):
+                raise ValueError('Unpacked executable was not applied: ' + relative)
+    status('Verified emulator DLLs, configuration, and executable outputs.')
+
+
 def work(job):
     folder = JOBS / identity(job)
     request = json.loads((folder / 'request.json').read_text())
@@ -141,7 +162,11 @@ def work(job):
     key = request.get('ApiKey', '')
     deadline = time.monotonic() + int(request.get('TimeoutMinutes', 5)) * 60
     def status(text):
-        write_json(folder / 'status.json', {'message': redact(text, key)[-1000:]})
+        text = redact(text, key)
+        log = folder / 'activity.log'
+        previous = log.read_text(errors='replace') if log.exists() else ''
+        log.write_text((previous + text + '\n')[-65536:])
+        write_json(folder / 'status.json', {'message': text[-1000:]})
     def check():
         if (folder / 'cancel').exists():
             raise ValueError('Cancelled.')
@@ -180,10 +205,17 @@ def work(job):
                         configuration(request)
                         if not (CLI / 'SteamAutoCrack.CLI.exe').is_file():
                             raise ValueError('Set up the VM CLI in SteamAutoCrack settings first.')
+                        if (root / BACKUP / 'manifest.json').is_file():
+                            status('Restoring the previous installation before running SteamAutoCrack…')
+                            restore(root, check, status)
                         snapshot(root, appid, check, status)
                         try:
+                            collect_cli_backups(root, 'existing', check, status)
+                            collect_existing_settings(root, check, status)
                             status('Running Windows SteamAutoCrack CLI…')
                             run_cli(root, request, folder, check, status)
+                            verify_applied(root, request, status)
+                            collect_cli_backups(root, 'generated', check, status)
                             finalize(root)
                         except Exception:
                             status('Restoring original files after an interrupted CLI job…')
@@ -236,16 +268,18 @@ def dispatch(command, job=None):
         shutil.rmtree(folder)
         return {'removed': True}
     if command == 'status':
+        log = folder / 'activity.log'
+        detail = {'log': log.read_text(errors='replace')[-65536:] if log.exists() else ''}
         result = folder / 'result.json'
         if result.is_file():
-            return {'done': True, 'result': json.loads(result.read_text())}
+            return {'done': True, 'result': json.loads(result.read_text()), **detail}
         state = folder / 'status.json'
         pid = json.loads((folder / 'pid.json').read_text())['pid']
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
             return {'done': True, 'result': {'Success': False, 'Message': 'VM worker stopped. Backups were retained for recovery.'}}
-        return {'done': False, 'message': json.loads(state.read_text())['message'] if state.exists() else 'Starting VM CLI…'}
+        return {'done': False, 'message': json.loads(state.read_text())['message'] if state.exists() else 'Starting VM CLI…', **detail}
     raise ValueError('Invalid VM job command.')
 
 

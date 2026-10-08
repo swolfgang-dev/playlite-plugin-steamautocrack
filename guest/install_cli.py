@@ -12,7 +12,7 @@ import time
 import urllib.request
 
 VERSION = '3.5.1.0'
-RECIPE = 2
+RECIPE = 3
 COMMIT = 'f8b93bc2ae76ce3348cc98fd3af8f2b0521c0967'
 SOURCE_SHA256 = 'ba664a7ba8c21c92e917ef92e0bdd1cf1f3c1ba321d0633e425b909ac0d93665'
 SDK_VERSION = '10.0.401'
@@ -80,6 +80,12 @@ def install(check=lambda: None, status=lambda text: None):
                              r'new Option<\1>("\2") { Description = "\3" }', text)
         if count != 3:
             raise ValueError('The pinned CLI option compatibility patch no longer matches upstream.')
+        anchor = '            await new Processor().ProcessFileCLI();'
+        if text.count(anchor) != 1:
+            raise ValueError('The CLI app-list initialization patch no longer matches upstream.')
+        text = text.replace(anchor,
+            '            if (Config.ProcessConfigs.GenerateEMUGameInfo && (int)Config.EMUGameInfoConfigs.GameInfoAPI != 2)\n'
+            '                await SteamAppList.Initialize().ConfigureAwait(false);\n' + anchor)
         program.write_text(text)
         prepared = folder / 'publish'
         env = os.environ.copy()

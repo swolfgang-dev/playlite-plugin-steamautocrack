@@ -1,7 +1,7 @@
 {
   "id": "SteamAutoCrack",
   "name": "SteamAutoCrack",
-  "version": "3.0.0",
+  "version": "3.2.0",
   "api_version": 1,
   "type": "generic",
   "enabled": true,
@@ -25,6 +25,11 @@
       "id": "SteamDepotDownloader",
       "repository": "swolfgang-dev/playlite-plugin-steam-depot-downloader",
       "minimum_version": "0.1.11"
+    },
+    {
+      "id": "CrackTools",
+      "repository": "swolfgang-dev/playlite-plugin-crack-tools",
+      "minimum_version": "0.1.0"
     }
   ]
 }

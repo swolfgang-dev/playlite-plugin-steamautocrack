@@ -8,6 +8,11 @@ import unittest
 from unittest.mock import patch
 from source_support import ROOT
 
+backup_spec = importlib.util.spec_from_file_location('backup', ROOT.parent / 'playlite-plugin-crack-tools/backup.py')
+backup_module = importlib.util.module_from_spec(backup_spec)
+sys.modules['backup'] = backup_module
+backup_spec.loader.exec_module(backup_module)
+
 spec = importlib.util.spec_from_file_location('autocrack_guest_test', ROOT / 'guest/worker.py')
 worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
@@ -25,6 +30,9 @@ class GuestWorkerTests(unittest.TestCase):
         self.cli = self.root / 'cli'
         self.cli.mkdir()
         (self.cli / 'SteamAutoCrack.CLI.exe').touch()
+        emulator = self.cli / 'Goldberg/regular/x64/steam_api64.dll'
+        emulator.parent.mkdir(parents=True)
+        emulator.write_bytes(b'emulator')
         self.jobs = self.root / 'jobs'
         self.jobs.mkdir()
         for name, value in [('SHARED', self.shared), ('CLI', self.cli), ('JOBS', self.jobs)]:
@@ -95,12 +103,23 @@ class GuestWorkerTests(unittest.TestCase):
         folder.mkdir()
         (folder / 'request.json').write_text(json.dumps(self.request))
         def succeed(root, *args):
+            self.assertEqual((root / 'steam_api64.dll').read_bytes(), b'original')
             (root / 'steam_api64.dll').write_bytes(b'emulator')
+            settings = root / 'steam_settings'
+            settings.mkdir()
+            (settings / 'steam_appid.txt').write_text('123')
+            (settings / 'configs.user.ini').write_text('settings')
         with patch.object(worker, 'run_cli', side_effect=succeed):
             worker.work(job)
         self.assertTrue(json.loads((folder / 'result.json').read_text())['Success'])
         manifest = self.game / '.playlite-steamautocrack/manifest.json'
         self.assertEqual(json.loads(manifest.read_text())['Backend'], 'vm-cli')
+        repeat = self.jobs / ('4' * 32)
+        repeat.mkdir()
+        (repeat / 'request.json').write_text(json.dumps(self.request))
+        with patch.object(worker, 'run_cli', side_effect=succeed):
+            worker.work('4' * 32)
+        self.assertTrue(json.loads((repeat / 'result.json').read_text())['Success'])
         restore_job = '3' * 32
         restore_folder = self.jobs / restore_job
         restore_folder.mkdir()
@@ -108,3 +127,7 @@ class GuestWorkerTests(unittest.TestCase):
         worker.work(restore_job)
         self.assertTrue(json.loads((restore_folder / 'result.json').read_text())['Success'])
         self.assertEqual((self.game / 'steam_api64.dll').read_bytes(), b'original')
+
+    def test_verification_rejects_skipped_emulator(self):
+        with self.assertRaisesRegex(ValueError, 'not applied'):
+            worker.verify_applied(self.game, self.request, lambda text: None)

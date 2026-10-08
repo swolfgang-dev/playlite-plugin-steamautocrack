@@ -22,22 +22,8 @@ class Plugin(GenericPlugin):
         return QSettings('Playlite', 'SteamAutoCrack')
 
     def before_launch(self, window, game):
-        import fcntl
-        from .progress import SteamProgress
-        from PyQt6.QtCore import QProcess
-        for dialog in window.findChildren(SteamProgress):
-            if dialog.install_directory == game.get('InstallDirectory') and dialog.process.state() != QProcess.ProcessState.NotRunning:
-                show_warning(window, 'SteamAutoCrack', 'Wait for game-file processing to finish before launching.')
-                return False
-        lock = Path(game.get('InstallDirectory') or '') / '.playlite-steamautocrack.lock'
-        if lock.is_file():
-            with lock.open('a') as stream:
-                try:
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    show_warning(window, 'SteamAutoCrack', 'Wait for game-file processing to finish before launching.')
-                    return False
-        return True
+        from playlite_plugins.cracktools.plugin import Plugin as CrackTools
+        return CrackTools().before_launch(window, game)
 
     def create_settings(self, parent=None):
         from PyQt6.QtWidgets import QWidget, QFormLayout, QSpinBox, QHBoxLayout
@@ -209,12 +195,8 @@ class Plugin(GenericPlugin):
             run_dialog(SteamProgress(editor.steam_request, window))
 
     def ensure_stopped(self, window, game):
-        if window.game_detection.status(game['Id']) in ('Launching', 'Running'):
-            raise ValueError('Stop the game before modifying or restoring its files.')
-        from playlite.providers import IntegrationPlugin
-        for provider in window.game_providers:
-            if isinstance(provider, IntegrationPlugin) and provider.owns(game) and game['Id'] in provider.detect_running([game]):
-                raise ValueError('Stop the game before modifying or restoring its files.')
+        from playlite_plugins.cracktools.guards import ensure_stopped
+        ensure_stopped(window, game)
 
     def game_actions(self, window, game):
         if game.get('InstallDirectory') and not game.get('ArchivePath'):

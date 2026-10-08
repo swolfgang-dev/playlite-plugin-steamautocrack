@@ -18,6 +18,7 @@ class VMTransportTests(unittest.TestCase):
         self.backend = Mock()
         self.backend.configuration.return_value = {'domain': 'test-vm', 'shared': str(self.shared)}
         self.agent = self.backend.Agent.return_value
+        self.agent.rpc.return_value = dict(connected=True, protected=True)
         self.patch = patch.object(vm_backend, 'steam_backend', return_value=self.backend)
         self.patch.start()
         self.addCleanup(self.patch.stop)
@@ -65,6 +66,36 @@ class VMTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Cancelled'):
                 client.execute(request)
         self.assertEqual([call.args[0] for call in command.call_args_list][:3], ['start', 'cancel', 'status'])
+
+    def test_disconnected_vpn_reports_actionable_error_before_starting_job(self):
+        self.agent.rpc.side_effect = RuntimeError('NordVPN disconnected in the VM.')
+        client = vm_backend.Client('/vm')
+        with patch.object(client, 'boot'), patch.object(client, 'command') as command, \
+             patch.object(vm_backend.time, 'monotonic', side_effect=[0, 1, 1, 181]):
+            with self.assertRaisesRegex(ValueError, 'No game files were changed'):
+                client.execute(dict(InstallDirectory=str(self.game), GenerateInfo=True))
+            command.assert_not_called()
+        self.assertEqual([call.args[0]['command'] for call in self.agent.rpc.call_args_list], ['vpn_check', 'vpn_connect', 'vpn_check'])
+
+    def test_disconnected_vpn_connects_and_verifies_before_starting_job(self):
+        self.agent.rpc.side_effect = [RuntimeError('Disconnected'), {}, dict(connected=True, protected=True)]
+        client = vm_backend.Client('/vm')
+        with patch.object(client, 'boot'), patch.object(client, 'command') as command:
+            command.side_effect = [{}, dict(done=True, result=dict(Success=True, Message='Complete')), {}]
+            result = client.execute(dict(InstallDirectory=str(self.game), GenerateInfo=True))
+        self.assertTrue(result['Success'])
+        self.assertEqual([call.args[0]['command'] for call in self.agent.rpc.call_args_list],
+                         ['vpn_check', 'vpn_connect', 'vpn_check'])
+
+    def test_waits_when_connect_returns_before_vpn_is_ready(self):
+        client = vm_backend.Client('/vm')
+        self.agent.rpc.side_effect = [RuntimeError('Starting'), RuntimeError('Still starting'),
+                                     dict(connected=False), dict(connected=True, protected=False),
+                                     dict(connected=True, protected=True)]
+        with patch.object(vm_backend.time, 'sleep') as sleep:
+            client.wait_for_vpn()
+        self.assertTrue(sleep.called)
+        self.assertEqual(self.agent.rpc.call_args_list[-1].args[0], {'command': 'vpn_check'})
 
     def test_legacy_restore_does_not_require_a_vm_or_native_tools(self):
         from autocrack_source.backup import BACKUP, digest, write_json

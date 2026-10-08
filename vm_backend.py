@@ -76,8 +76,10 @@ class Client:
                     raise ValueError('Steam VM guest control did not become ready.') from None
                 time.sleep(1)
         for source, target in [('guest/worker.py', 'autocrack_worker.py'),
-                               ('guest/install_cli.py', 'install_cli.py'), ('backup.py', 'backup.py')]:
+                               ('guest/install_cli.py', 'install_cli.py')]:
             self.agent.write_file('/usr/local/lib/playlite-vm/' + target, (ASSETS / source).read_bytes())
+        from playlite_plugins.cracktools import backup
+        self.agent.write_file('/usr/local/lib/playlite-vm/backup.py', Path(backup.__file__).read_bytes())
 
     def command(self, command, job=None, request=None):
         args = ['/usr/bin/python3', GUEST, command, *([job] if job else [])]
@@ -91,6 +93,38 @@ class Client:
             raise ValueError(envelope.get('error', 'Steam VM CLI request failed.'))
         return envelope['result']
 
+    def wait_for_vpn(self):
+        deadline = time.monotonic() + 180
+        next_connect = 0
+        last_error = 'VPN has not become ready.'
+        while True:
+            self.check_cancelled()
+            try:
+                state = self.agent.rpc({'command': 'vpn_check'})
+                if state.get('connected') is True and state.get('protected') is True:
+                    self.status('VM VPN connected and verified.')
+                    return
+            except RuntimeError as error:
+                last_error = str(error)
+            now = time.monotonic()
+            if now >= deadline:
+                raise ValueError('Timed out waiting for the VM VPN: ' + last_error +
+                                 ' Check NordVPN in the Steam VM and retry. '
+                                 'No game files were changed by this attempt.')
+            if now >= next_connect:
+                self.status('Waiting for the VM VPN service; connecting NordVPN…')
+                try:
+                    self.agent.rpc({'command': 'vpn_connect'})
+                except RuntimeError as error:
+                    last_error = str(error)
+                next_connect = time.monotonic() + 30
+                continue
+            self.status('Waiting for NordVPN to connect and verify protection…')
+            # Short waits keep cancellation responsive while the guest finishes booting.
+            for _ in range(10):
+                self.check_cancelled()
+                time.sleep(.2)
+
     def execute(self, request):
         self.boot()
         payload = dict(request)
@@ -100,7 +134,7 @@ class Client:
             payload['GuestPath'] = shared_game_path(request['InstallDirectory'], self.cfg['shared'])
             if request.get('GenerateInfo') and not request.get('Restore'):
                 self.status('Checking the VM VPN before Steam game-info requests…')
-                self.agent.rpc({'command': 'vpn_check'})
+                self.wait_for_vpn()
         job = uuid.uuid4().hex
         payload['JobId'] = job
         self.check_cancelled()
@@ -115,13 +149,23 @@ class Client:
                     self.status('Cancelling the VM CLI and restoring original files…')
                     deadline = min(deadline, time.monotonic() + 180)
                 state = self.command('status', job)
+                if state.get('log'):
+                    self.status(state['log'])
                 if state.get('done'):
                     result = state['result']
-                    self.command('cleanup', job)
+                    message = result.get('Message', 'Finished')
+                    lines = state.get('log', '').rstrip().splitlines()
+                    if not lines or lines[-1] != message:
+                        self.status(message)
+                    try:
+                        self.command('cleanup', job)
+                    except ValueError:
+                        self.status('Could not remove the finished VM job; its log remains in the VM.')
                     if not result.get('Success'):
                         raise ValueError(result.get('Message', 'VM CLI processing failed.'))
                     return result
-                self.status(state.get('message', 'Processing in the Steam VM…'))
+                if not state.get('log'):
+                    self.status(state.get('message', 'Processing in the Steam VM…'))
                 if time.monotonic() > deadline:
                     raise ValueError('VM CLI did not finish. Check the VM before retrying; backups were retained.')
                 time.sleep(.5)

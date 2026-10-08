@@ -6,7 +6,7 @@ from unittest.mock import patch
 from PyQt6.QtCore import QProcess
 from PyQt6.QtWidgets import QApplication
 from source_support import ROOT
-from autocrack_source.progress import SteamBatchProgress
+from autocrack_source.progress import SteamBatchProgress, SteamProgress
 
 APP = QApplication.instance() or QApplication([])
 
@@ -16,7 +16,7 @@ class BatchProgressTests(unittest.TestCase):
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.jobs = [(dict(Id=str(i), Name='Game ' + str(i)), dict(InstallDirectory='/games/' + str(i))) for i in range(3)]
-        self.private = patch('autocrack_source.runner.PRIVATE', Path(self.directory.name))
+        self.private = patch('playlite_plugins.cracktools.jobs.PRIVATE', Path(self.directory.name))
         self.private.start()
         self.addCleanup(self.private.stop)
         self.start = patch.object(QProcess, 'start')
@@ -27,6 +27,26 @@ class BatchProgressTests(unittest.TestCase):
         (dialog.job / 'result.json').write_text(json.dumps(dict(Success=success, Message='result')))
         dialog.process_finished()
         APP.processEvents()
+
+    def test_single_game_displays_saved_log_and_final_restore_error(self):
+        dialog = SteamProgress(dict(InstallDirectory='/games/test', Restore=True))
+        (dialog.job / 'log.txt').write_text('Checking original backups\nVerifying steam_api64.dll\n')
+        dialog.poll()
+        self.assertIn('Verifying steam_api64.dll', dialog.activity_log.toPlainText())
+        (dialog.job / 'result.json').write_text(json.dumps(dict(Success=False, Message='DLL changed after processing')))
+        dialog.process_finished()
+        self.assertIn('DLL changed after processing', dialog.activity_log.toPlainText())
+        self.assertIn(str(dialog.job / 'log.txt'), dialog.log_path.text())
+        dialog.accept()
+
+    def test_completion_message_already_in_log_is_not_appended_again(self):
+        dialog = SteamProgress(dict(InstallDirectory='/games/test'))
+        message = 'Original game files restored.'
+        (dialog.job / 'log.txt').write_text('Preparing…\n' + message + '\n')
+        (dialog.job / 'result.json').write_text(json.dumps(dict(Success=True, Message=message)))
+        dialog.process_finished()
+        self.assertEqual(dialog.activity_log.toPlainText().count(message), 1)
+        dialog.accept()
 
     def test_jobs_are_sequential_and_failures_do_not_stop_the_rest(self):
         dialog = SteamBatchProgress(self.jobs)

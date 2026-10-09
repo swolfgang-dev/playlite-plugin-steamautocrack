@@ -1,7 +1,7 @@
 {
   "id": "SteamAutoCrack",
   "name": "SteamAutoCrack",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "api_version": 1,
   "type": "generic",
   "enabled": true,
@@ -29,7 +29,7 @@
     {
       "id": "CrackTools",
       "repository": "swolfgang-dev/playlite-plugin-crack-tools",
-      "minimum_version": "0.1.0"
+      "minimum_version": "0.2.1"
     }
   ]
 }

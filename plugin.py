@@ -51,11 +51,15 @@ class Plugin(GenericPlugin):
         browse.clicked.connect(pick)
         row.addWidget(browse)
         form.addRow('Steam VM userdata', row)
-        widget.generate_info = QCheckBox('Generate Steam achievements, stats, and DLC configuration')
-        widget.generate_info.setChecked(settings.value('generateInfo', True, type=bool))
+        for field, key, title in [('achievements', 'generateAchievements', 'Generate Steam achievements'),
+                                  ('stats', 'generateStats', 'Generate Steam stats'),
+                                  ('dlc', 'generateDlc', 'Generate Steam DLC configuration')]:
+            control = QCheckBox(title)
+            control.setChecked(settings.value(key, settings.value('generateInfo', True, type=bool), type=bool))
+            setattr(widget, field, control)
+            form.addRow(control)
         widget.unpack = QCheckBox('Unpack SteamStub executables')
         widget.unpack.setChecked(settings.value('unpack', True, type=bool))
-        form.addRow(widget.generate_info)
         form.addRow(widget.unpack)
         setup = QPushButton('Set up / check VM CLI…')
         setup.clicked.connect(lambda: self.setup_vm(widget))
@@ -117,7 +121,9 @@ class Plugin(GenericPlugin):
         settings = self.settings()
         for key, value in [('username', widget.username.text().strip()), ('timeout', widget.timeout.value()),
                            ('apiKey', widget.api_key.text().strip()), ('vmRoot', vm_root),
-                           ('generateInfo', widget.generate_info.isChecked()), ('unpack', widget.unpack.isChecked())]:
+                           ('generateAchievements', widget.achievements.isChecked()),
+                           ('generateStats', widget.stats.isChecked()), ('generateDlc', widget.dlc.isChecked()),
+                           ('unpack', widget.unpack.isChecked())]:
             settings.setValue(key, value)
         for obsolete in ('emulatorDirectory', 'unpackerPath'):
             settings.remove(obsolete)
@@ -163,7 +169,10 @@ class Plugin(GenericPlugin):
         if not root.is_absolute() or not root.is_dir() or root.is_symlink() or game.get('ArchivePath'):
             raise ValueError('Select an installed game folder before running SteamAutoCrack.')
         key = key or settings.value('apiKey', '')
-        info = settings.value('generateInfo', True, type=bool)
+        options = {field: settings.value(key, settings.value('generateInfo', True, type=bool), type=bool)
+                   for field, key in [('GenerateAchievements', 'generateAchievements'),
+                                      ('GenerateStats', 'generateStats'), ('GenerateDlc', 'generateDlc')]}
+        info = any(options.values())
         if info and not re.fullmatch(r'[a-fA-F0-9]{32}', key):
             raise ValueError('Set a Steam Web API key, or disable game-info generation in plugin settings.')
         from .vm_backend import Client, shared_game_path
@@ -171,7 +180,7 @@ class Plugin(GenericPlugin):
         client = Client(vm_root)
         shared_game_path(root, client.cfg['shared'])
         return dict(InstallDirectory=str(root), AppId=str(appid), ApiKey=key if info else '', GenerateInfo=info,
-                    GenerateConfig=True, Unpack=settings.value('unpack', True, type=bool), ApplyEmulator=True,
+                    **options, GenerateConfig=True, Unpack=settings.value('unpack', True, type=bool), ApplyEmulator=True,
                     VmRoot=vm_root, TimeoutMinutes=settings.value('timeout', 5, type=int),
                     GoldbergUsername=settings.value('username', getpass.getuser()))
 

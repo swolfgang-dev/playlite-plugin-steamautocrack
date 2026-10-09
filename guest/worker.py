@@ -11,8 +11,10 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backup import BACKUP, LOCK, write_json, snapshot, finalize, restore, collect_cli_backups, collect_existing_settings, files, digest
+from vanilla import installed_baseline
+from backup import BACKUP, LOCK, write_json, snapshot, finalize, restore, collect_cli_backups, collect_existing_settings, files, digest, protect_cli_backups
 
 SHARED = Path('/mnt/standalone')
 PREFIX = Path.home() / '.local/share/playlite/wine-steam-auto-crack'
@@ -58,8 +60,26 @@ def configuration(request):
                 GenerateCrackOnly=False, Restore=restoring),
                 EMUConfigs=dict(AccountName=username),
                 EMUGameInfoConfigs=dict(GameInfoAPI=1 if info else 2, SteamWebAPIKeyType=0, SteamWebAPIKey=key if info else '',
-                                       GenerateImages=True, UseSteamWebAppList=False),
+                                       GenerateImages=bool(request.get('GenerateAchievements', info)), UseSteamWebAppList=False),
                 SteamStubUnpackerConfigs=dict(SteamAPICheckBypassMode=0), LogToFile=False)
+
+
+def filter_game_info(root, request):
+    # Upstream exposes one generator for all three categories. Filter only
+    # its installed settings, leaving recovery and original backups intact.
+    for relative, path in files(root).items():
+        if 'steam_settings' not in path.relative_to(root).parts:
+            continue
+        achievements = bool(request.get('GenerateAchievements', request.get('GenerateInfo', True)))
+        stats = bool(request.get('GenerateStats', request.get('GenerateInfo', True)))
+        dlc = bool(request.get('GenerateDlc', request.get('GenerateInfo', True)))
+        if ((not achievements and (path.name == 'achievements.json' or 'achievement_images' in path.parts)) or
+                (not stats and path.name in ('stats.json', 'stats.txt'))):
+            path.unlink()
+        elif not dlc and path.name == 'configs.app.ini':
+            text = path.read_text(encoding='utf-8-sig')
+            text = re.sub(r'(?ms)^\[app::dlcs\][^\n]*\n.*?(?=^\[|\Z)', '', text)
+            path.write_text(text.rstrip() + '\n\n[app::dlcs]\nunlock_all=0\n', encoding='utf-8')
 
 
 def redact(text, key=''):
@@ -205,15 +225,23 @@ def work(job):
                         configuration(request)
                         if not (CLI / 'SteamAutoCrack.CLI.exe').is_file():
                             raise ValueError('Set up the VM CLI in SteamAutoCrack settings first.')
-                        if (root / BACKUP / 'manifest.json').is_file():
+                        status('Reading the installed-build vanilla manifest…')
+                        baseline = installed_baseline(root, appid)
+                        previous = root / BACKUP / 'manifest.json'
+                        if previous.is_file():
+                            saved_app = json.loads(previous.read_text()).get('AppId')
+                            if saved_app is not None and str(saved_app) != appid:
+                                raise ValueError('The previous backup belongs to a different Steam game. Restore it separately first.')
                             status('Restoring the previous installation before running SteamAutoCrack…')
                             restore(root, check, status)
-                        snapshot(root, appid, check, status)
+                        snapshot(root, appid, check, status, vanilla=baseline, unpack=bool(request.get('Unpack', True)))
                         try:
                             collect_cli_backups(root, 'existing', check, status)
                             collect_existing_settings(root, check, status)
                             status('Running Windows SteamAutoCrack CLI…')
-                            run_cli(root, request, folder, check, status)
+                            with protect_cli_backups(root):
+                                run_cli(root, request, folder, check, status)
+                            filter_game_info(root, request)
                             verify_applied(root, request, status)
                             collect_cli_backups(root, 'generated', check, status)
                             finalize(root)

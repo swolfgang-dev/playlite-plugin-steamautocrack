@@ -76,7 +76,8 @@ class Client:
                     raise ValueError('Steam VM guest control did not become ready.') from None
                 time.sleep(1)
         for source, target in [('guest/worker.py', 'autocrack_worker.py'),
-                               ('guest/install_cli.py', 'install_cli.py')]:
+                               ('guest/install_cli.py', 'install_cli.py'),
+                               ('guest/vanilla.py', 'vanilla.py')]:
             self.agent.write_file('/usr/local/lib/playlite-vm/' + target, (ASSETS / source).read_bytes())
         from playlite_plugins.cracktools import backup
         self.agent.write_file('/usr/local/lib/playlite-vm/backup.py', Path(backup.__file__).read_bytes())

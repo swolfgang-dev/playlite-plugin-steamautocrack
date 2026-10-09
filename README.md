@@ -4,7 +4,7 @@ Process Windows games with the Windows SteamAutoCrack CLI inside the Steam
 Downloader VM. Playlite sends jobs through the QEMU guest agent; game files stay
 in the shared Steam library and are accessed as `S:\` inside Wine.
 
-Requires Playlite 0.2.61 or later and Steam Downloader 0.1.11 or later.
+Requires Playlite 0.2.61 or later, Steam Downloader 0.1.11 or later, and Crack Tools 0.2.0 or later.
 
 ## Setup
 
@@ -42,13 +42,30 @@ The existing **Run SteamAutoCrack after adding** option is retained. Ctrl-click
 or Shift-click games, then use the selection action to process a sequential
 batch with per-game results and cancellation.
 
-Before running the CLI, the guest saves verified copies of executable/library
-files and existing `steam_settings` content in
-`<game>/.playlite-steamautocrack/`. CLI errors, timeouts, and cancellation restore
-those originals and remove newly generated processing files. If recovery cannot finish,
-backups remain available. **Restore originals** preserves files that
-changed after processing without first preserving them in the backup folder’s
-`recovery/` subfolder. Previous processing or archive installations are restored automatically before a new run.
+Before running the CLI, the guest reads the cached Steam depot manifests for
+this game's installed build. It verifies the Steam API DLLs and, when unpacking
+is enabled, executables against their official size and SHA-1 hashes. Only
+these targets and any official configuration files the CLI may replace are
+copied to `<game>/.playlite-steamautocrack/`. Unrelated DLLs and large game assets
+are not copied or hashed. Missing manifests, missing targets, and modified or
+non-official targets block processing: install or verify the game in the Steam
+VM first. A directory listing alone is never accepted as proof of vanilla files.
+
+Known pre-existing generated settings, CLI `.bak` files and unpacked executable
+outputs that are absent from the official manifest are moved into the managed
+folder's `recovery/` area. They are not vanilla backups and are not reinstalled
+by **Restore originals**. Other unrelated non-official files are left alone.
+The backup record retains the installed build/depot identities and official
+file inventory, and tracks files and directories created by processing.
+
+CLI errors, timeouts, and cancellation restore the verified originals and
+remove newly generated processing files. If recovery cannot finish, backups
+remain available. **Restore originals** preserves files changed after processing
+in `recovery/` before replacing them. Previous processing or archive
+installations are restored automatically before a new run, then the targets
+must pass the official hashes again so processed files cannot become the next
+run's originals. This is a targeted undo mechanism, not a full Steam verification
+or a blanket removal of every mod in the game folder.
 Legacy backups made by the native plugin remain recoverable, including games
 outside the shared VM library. Old native tool downloads are left in user data
 and are no longer used.
@@ -93,3 +110,5 @@ files and unrelated files added after processing remain unchanged. Older manifes
 retain their original, more limited recovery coverage.
 
 Shared backup, restoration, progress and game-file guards are provided by Crack Tools (0.1.0 or later). Steam Downloader remains required to manage the VM and VPN.
+
+Achievements, stats, and DLC configuration have separate settings. Existing combined preferences initialize all three controls. The upstream CLI generates game info together; the plugin removes deselected categories before finalizing the installation. Disabling achievements also disables image downloads. With all three disabled, game info uses the offline generator.

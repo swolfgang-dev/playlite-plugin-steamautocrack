@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -42,6 +43,9 @@ class GuestWorkerTests(unittest.TestCase):
         mounted = patch.object(worker.os.path, 'ismount', return_value=True)
         mounted.start()
         self.addCleanup(mounted.stop)
+        baseline = {'AppId': '123', 'BuildId': '1', 'Depots': {'1': '2'}, 'Files': {'steam_api64.dll': {'path': 'steam_api64.dll', 'sha1': hashlib.sha1(b'original').hexdigest(), 'size': 8}}}
+        baseline_patch = patch.object(worker, 'installed_baseline', return_value=baseline)
+        baseline_patch.start(); self.addCleanup(baseline_patch.stop)
         self.request = dict(GuestPath=str(self.game), AppId='123', GenerateInfo=False,
                             Unpack=False, TimeoutMinutes=2, GoldbergUsername='Test Player')
 
@@ -53,6 +57,30 @@ class GuestWorkerTests(unittest.TestCase):
         self.assertEqual(config['EMUConfigs']['AccountName'], 'Test Player')
         self.assertEqual(config['SteamStubUnpackerConfigs']['SteamAPICheckBypassMode'], 0)
         self.assertFalse(config['LogToFile'])
+
+    def test_separate_game_info_controls_filter_only_selected_outputs(self):
+        settings = self.game / 'steam_settings'
+        settings.mkdir()
+        for name in ('achievements.json', 'stats.json', 'steam_appid.txt'):
+            (settings / name).write_text('example')
+        (settings / 'configs.app.ini').write_text('[app::general]\nappid=123\n\n[app::dlcs]\nunlock_all=1\n456=DLC\n\n[app::other]\nvalue=1\n')
+        images = settings / 'achievement_images'
+        images.mkdir()
+        (images / 'icon.jpg').write_bytes(b'image')
+        request = dict(self.request, GenerateInfo=True, ApiKey='a' * 32,
+                       GenerateAchievements=False, GenerateStats=True, GenerateDlc=False)
+        self.assertFalse(worker.configuration(request)['EMUGameInfoConfigs']['GenerateImages'])
+        worker.filter_game_info(self.game, request)
+        self.assertFalse((settings / 'achievements.json').exists())
+        self.assertFalse((images / 'icon.jpg').exists())
+        self.assertTrue((settings / 'stats.json').exists())
+        self.assertTrue((settings / 'steam_appid.txt').exists())
+        ini = (settings / 'configs.app.ini').read_text()
+        self.assertNotIn('456=DLC', ini)
+        self.assertIn('unlock_all=0', ini)
+        self.assertIn('[app::other]', ini)
+        worker.filter_game_info(self.game, dict(request, GenerateStats=False))
+        self.assertFalse((settings / 'stats.json').exists())
 
     def test_path_validation_rejects_root_outside_private_and_unmounted_folders(self):
         private = self.shared / '.staging'
@@ -78,6 +106,18 @@ class GuestWorkerTests(unittest.TestCase):
                 worker.run_cli(self.game, request, folder, lambda: None, lambda text: None)
         self.assertNotIn('a' * 32, (folder / 'log.txt').read_text())
         self.assertFalse((folder / 'cli-config.json').exists())
+
+    def test_modified_original_blocks_cli_before_processing(self):
+        folder = self.jobs / ('3' * 32); folder.mkdir()
+        (folder / 'request.json').write_text(json.dumps(self.request))
+        (self.game / 'steam_api64.dll').write_bytes(b'already modified')
+        with patch.object(worker, 'run_cli') as cli:
+            worker.work('3' * 32)
+        result = json.loads((folder / 'result.json').read_text())
+        self.assertFalse(result['Success'])
+        self.assertIn('Not a verified vanilla original', result['Message'])
+        cli.assert_not_called()
+        self.assertFalse((self.game / backup_module.BACKUP).exists())
 
     def test_guest_failure_restores_originals_and_removes_new_files(self):
         job = '1' * 32

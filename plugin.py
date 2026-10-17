@@ -109,7 +109,7 @@ class Plugin(GenericPlugin):
         run_dialog(dialog)
         return installed[0] if installed else None
 
-    def save_settings(self, widget):
+    def validate_settings(self, widget):
         if not widget.username.text().strip() or len(widget.username.text().strip()) > 128 or any(c in widget.username.text() for c in '\r\n\0'):
             raise ValueError('Enter a valid emulator username.')
         key = widget.api_key.text().strip()
@@ -118,6 +118,10 @@ class Plugin(GenericPlugin):
         vm_root = widget.vm_root.text().strip()
         if not Path(vm_root).is_absolute() or any(c in vm_root for c in '\r\n\0'):
             raise ValueError('Select an absolute Steam VM userdata folder.')
+        return vm_root
+
+    def save_settings(self, widget):
+        vm_root = self.validate_settings(widget)
         settings = self.settings()
         for key, value in [('username', widget.username.text().strip()), ('timeout', widget.timeout.value()),
                            ('apiKey', widget.api_key.text().strip()), ('vmRoot', vm_root),

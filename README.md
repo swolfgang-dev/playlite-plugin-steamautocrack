@@ -4,7 +4,7 @@ Process Windows games with the Windows SteamAutoCrack CLI inside the Steam
 Downloader VM. Playlite sends jobs through the QEMU guest agent; game files stay
 in the shared Steam library and are accessed as `S:\` inside Wine.
 
-Requires Playlite 0.2.61 or later, Steam Downloader 0.1.11 or later, and Crack Tools 0.2.0 or later.
+Requires Playlite 0.2.88 or later, Steam Downloader 0.1.11 or later, and Crack Tools 0.2.1 or later.
 
 ## Setup
 
@@ -85,7 +85,7 @@ since upstream may log an error while returning zero.
 Build a standalone plugin archive with `python3 tools/build_release.py`.
 `dist/plugin.zip` includes the VM adapter and guest worker/setup recipes.
 Install/update from this archive in Playlite, then restart Playlite.
-Tag the manifest version (`v3.1.4`) to publish through the release workflow.
+Tag the manifest version (`v3.3.0`) to publish through the release workflow.
 
 With Playlite and PyQt6 available, run:
 
@@ -109,6 +109,6 @@ directories, and restores only original files changed by processing. Untouched
 files and unrelated files added after processing remain unchanged. Older manifests
 retain their original, more limited recovery coverage.
 
-Shared backup, restoration, progress and game-file guards are provided by Crack Tools (0.1.0 or later). Steam Downloader remains required to manage the VM and VPN.
+Shared backup, restoration, progress and game-file guards are provided by Crack Tools (0.2.1 or later). Steam Downloader remains required to manage the VM and VPN.
 
 Achievements, stats, and DLC configuration have separate settings. Existing combined preferences initialize all three controls. The upstream CLI generates game info together; the plugin removes deselected categories before finalizing the installation. Disabling achievements also disables image downloads. With all three disabled, game info uses the offline generator.

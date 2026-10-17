@@ -171,3 +171,43 @@ class GuestWorkerTests(unittest.TestCase):
     def test_verification_rejects_skipped_emulator(self):
         with self.assertRaisesRegex(ValueError, 'not applied'):
             worker.verify_applied(self.game, self.request, lambda text: None)
+
+    def test_malformed_requests_write_failure_results_and_remove_credentials(self):
+        for index, content in enumerate(('[]', '{', '{"TimeoutMinutes": true}', '{"ApiKey": ["invalid"]}')):
+            job = f'{index:032x}'
+            folder = self.jobs / job
+            folder.mkdir()
+            (folder / 'request.json').write_text(content)
+            worker.work(job)
+            self.assertFalse(json.loads((folder / 'result.json').read_text())['Success'])
+            self.assertFalse((folder / 'request.json').exists())
+
+    def test_reused_worker_pid_reports_failure_without_waiting_forever(self):
+        job = 'a' * 32
+        folder = self.jobs / job
+        folder.mkdir()
+        (folder / 'pid.json').write_text(json.dumps({'pid': 42, 'started': 'old'}))
+        with patch.object(worker, 'process_identity', return_value='different'):
+            result = worker.dispatch('status', job)
+        self.assertTrue(result['done'])
+        self.assertFalse(result['result']['Success'])
+
+    def test_cli_staging_failure_preserves_current_and_previous_recovery(self):
+        spec = importlib.util.spec_from_file_location('review_cli_installer', ROOT / 'guest/install_cli.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        prepared = self.root / 'prepared'
+        prepared.mkdir()
+        (prepared / 'new').write_text('new')
+        previous = self.cli.with_name('SteamAutoCrackCLI.previous')
+        previous.mkdir()
+        (previous / 'recover').write_text('retained')
+        with self.assertRaisesRegex(ValueError, 'recovery'):
+            installer.activate(prepared, self.cli)
+        self.assertEqual((previous / 'recover').read_text(), 'retained')
+        self.assertTrue((self.cli / 'SteamAutoCrack.CLI.exe').exists())
+        previous.rename(self.root / 'retained')
+        with patch.object(installer.shutil, 'copytree', side_effect=OSError('copy failed')):
+            with self.assertRaises(OSError):
+                installer.activate(prepared, self.cli)
+        self.assertTrue((self.cli / 'SteamAutoCrack.CLI.exe').exists())

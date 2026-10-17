@@ -34,6 +34,9 @@ def download(url, target, algorithm, expected, check):
 
 
 def install(check=lambda: None, status=lambda text: None):
+    previous = CLI.with_name('SteamAutoCrackCLI.previous')
+    if previous.exists() and not CLI.exists():
+        previous.rename(CLI)
     marker = CLI / 'playlite-cli-version.json'
     if (CLI / 'SteamAutoCrack.CLI.exe').is_file() and marker.is_file():
         if json.loads(marker.read_text()).get('commit') == COMMIT and json.loads(marker.read_text()).get('recipe') == RECIPE:
@@ -121,17 +124,26 @@ def install(check=lambda: None, status=lambda text: None):
         shutil.copyfile(source / 'LICENSE.md', prepared / 'UPSTREAM-LICENSE.md')
         (prepared / 'playlite-cli-version.json').write_text(json.dumps(dict(version=VERSION, commit=COMMIT, recipe=RECIPE)))
         check()
-        old = CLI.with_name('SteamAutoCrackCLI.previous')
+        activate(prepared)
+    status('Windows CLI ' + VERSION + ' is ready in the Steam VM.')
+
+
+def activate(prepared, destination=None):
+    """Finish staging before replacing the installed CLI; preserve old recovery."""
+    destination = Path(destination) if destination is not None else CLI
+    old = destination.with_name('SteamAutoCrackCLI.previous')
+    if old.exists() or old.is_symlink():
+        raise ValueError('A previous CLI recovery directory remains; inspect it before updating.')
+    with tempfile.TemporaryDirectory(prefix='.playlite-cli-', dir=destination.parent) as temporary:
+        staged = Path(temporary) / 'prepared'
+        shutil.copytree(prepared, staged, symlinks=True)
+        if destination.exists():
+            destination.rename(old)
+        try:
+            staged.rename(destination)
+        except Exception:
+            if old.exists():
+                old.rename(destination)
+            raise
         if old.exists():
             shutil.rmtree(old)
-        if CLI.exists():
-            CLI.rename(old)
-        try:
-            shutil.copytree(prepared, CLI, symlinks=True)
-        except Exception:
-            shutil.rmtree(CLI, ignore_errors=True)
-            if old.exists():
-                old.rename(CLI)
-            raise
-        shutil.rmtree(old, ignore_errors=True)
-    status('Windows CLI ' + VERSION + ' is ready in the Steam VM.')

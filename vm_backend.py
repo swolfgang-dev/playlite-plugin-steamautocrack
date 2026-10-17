@@ -195,6 +195,8 @@ def process(request, cancel=lambda: False, status=lambda text: None):
             import fcntl
             if not root.is_absolute() or root.is_symlink() or not root.is_dir():
                 raise ValueError('Select an installed game folder before restoring originals.')
+            if (root / LOCK).is_symlink():
+                raise ValueError('The game lock cannot be a symlink.')
             with (root / LOCK).open('a') as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

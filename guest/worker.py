@@ -177,10 +177,8 @@ def verify_applied(root, request, status):
 
 def work(job):
     folder = JOBS / identity(job)
-    request = json.loads((folder / 'request.json').read_text())
-    (folder / 'request.json').unlink()
-    key = request.get('ApiKey', '')
-    deadline = time.monotonic() + int(request.get('TimeoutMinutes', 5)) * 60
+    key = ''
+    deadline = time.monotonic() + 300
     def status(text):
         text = redact(text, key)
         log = folder / 'activity.log'
@@ -194,6 +192,17 @@ def work(job):
             raise ValueError('VM processing timed out.')
     result = {'Success': False, 'Message': 'VM processing stopped. Backups remain available.'}
     try:
+        request = json.loads((folder / 'request.json').read_text())
+        if not isinstance(request, dict):
+            raise ValueError('Invalid VM job request.')
+        timeout = request.get('TimeoutMinutes', 5)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 120:
+            raise ValueError('Timeout must be between 1 and 120 minutes.')
+        candidate_key = request.get('ApiKey', '')
+        if not isinstance(candidate_key, str):
+            raise ValueError('Invalid API key.')
+        key = candidate_key
+        deadline = time.monotonic() + timeout * 60
         status('Preparing the Steam VM CLI…')
         global_lock = JOBS.parent / 'cli.lock'
         with global_lock.open('a') as lock:
@@ -255,8 +264,18 @@ def work(job):
         message = str(error) if isinstance(error, (ValueError, OSError)) else 'VM CLI processing failed. Check the VM and retained backups.'
         result = {'Success': False, 'Message': redact(message, key)[-2500:]}
     finally:
+        (folder / 'request.json').unlink(missing_ok=True)
         (folder / 'cli-config.json').unlink(missing_ok=True)
         write_json(folder / 'result.json', result)
+
+
+def process_identity(pid):
+    """A reused PID or an unreaped zombie is not an active worker."""
+    try:
+        fields = Path(f'/proc/{int(pid)}/stat').read_text().rsplit(')', 1)[1].split()
+        return None if fields[0] == 'Z' else fields[19]
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def dispatch(command, job=None):
@@ -279,9 +298,15 @@ def dispatch(command, job=None):
             try:
                 child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'work', job],
                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
-                write_json(folder / 'pid.json', {'pid': child.pid})
+                write_json(folder / 'pid.json', {'pid': child.pid, 'started': process_identity(child.pid)})
             except Exception:
-                shutil.rmtree(folder)
+                if 'child' in locals():
+                    # Let the worker unwind and restore through its own checks.
+                    # Its CLI is in a separate process group; killing only the
+                    # worker here could orphan a process modifying game files.
+                    (folder / 'cancel').touch()
+                else:
+                    shutil.rmtree(folder)
                 raise
         return {'JobId': job}
     folder = JOBS / identity(job)
@@ -302,10 +327,9 @@ def dispatch(command, job=None):
         if result.is_file():
             return {'done': True, 'result': json.loads(result.read_text()), **detail}
         state = folder / 'status.json'
-        pid = json.loads((folder / 'pid.json').read_text())['pid']
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        saved = json.loads((folder / 'pid.json').read_text())
+        active = process_identity(saved['pid'])
+        if active is None or active != saved.get('started'):
             return {'done': True, 'result': {'Success': False, 'Message': 'VM worker stopped. Backups were retained for recovery.'}}
         return {'done': False, 'message': json.loads(state.read_text())['message'] if state.exists() else 'Starting VM CLI…', **detail}
     raise ValueError('Invalid VM job command.')

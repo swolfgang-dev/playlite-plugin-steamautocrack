@@ -6,7 +6,7 @@
   "type": "generic",
   "enabled": true,
   "repository": "swolfgang-dev/playlite-plugin-steamautocrack",
-  "minimum_playlite_version": "0.2.61",
+  "minimum_playlite_version": "0.2.88",
   "description": "Process shared Windows games with the SteamAutoCrack CLI inside the Steam Downloader VM.",
   "installation_hooks": true,
   "settings_groups": [

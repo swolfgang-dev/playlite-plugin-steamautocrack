@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import QApplication
 from source_support import ROOT
@@ -12,6 +12,29 @@ APP = QApplication.instance() or QApplication([])
 
 
 class InstallHookTests(unittest.TestCase):
+    def test_setup_cancels_on_shutdown_and_releases_pending_state(self):
+        import autocrack_source.plugin as module
+        tasks = []
+        plugin = Plugin()
+        widget = plugin.create_settings()
+        def setup(root, cancelled, progress):
+            self.assertTrue(cancelled())
+            raise ValueError('Cancelled')
+        def run(dialog):
+            self.assertTrue(dialog.shutdown_pending())
+            dialog.request_shutdown()
+            tasks[0].run()
+            self.assertFalse(dialog.shutdown_pending())
+            return dialog.result()
+        try:
+            with patch('autocrack_source.vm_backend.setup', side_effect=setup), \
+                    patch.object(module.QThreadPool, 'globalInstance', return_value=Mock(start=tasks.append)), \
+                    patch.object(module, 'run_dialog', side_effect=run), patch.object(module, 'show_warning') as warning:
+                self.assertIsNone(plugin.setup_vm(widget))
+            warning.assert_not_called()
+        finally:
+            widget.deleteLater()
+
     def test_install_hook_uses_vm_setup_and_preserves_preferences(self):
         manifest = json.loads((ROOT / 'manifest.json').read_text())
         self.assertTrue(manifest['installation_hooks'])

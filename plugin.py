@@ -95,16 +95,24 @@ class Plugin(GenericPlugin):
         vm_root = widget.vm_root.text().strip()
         task = Task(lambda: setup(vm_root, cancel.is_set, updates.progress.emit))
         def complete(result):
+            dialog.busy = False
             installed.append(result)
             dialog.accept()
         def failed(error):
+            dialog.busy = False
             dialog.reject()
             if not cancel.is_set():
                 show_warning(widget, 'Steam VM CLI setup', error)
-        task.signals.succeeded.connect(complete)
-        task.signals.failed.connect(failed)
+        task.bind(dialog, complete, failed)
         dialog.finished.connect(lambda: cancel.set())
         dialog.task = task
+        dialog.busy = True
+        dialog.shutdown_pending = lambda: dialog.busy
+        def shutdown():
+            cancel.set()
+            button.setEnabled(False)
+            label.setText('Cancelling VM CLI setup before closing Playlite…')
+        dialog.request_shutdown = shutdown
         QThreadPool.globalInstance().start(task)
         run_dialog(dialog)
         return installed[0] if installed else None

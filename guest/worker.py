@@ -17,9 +17,9 @@ from vanilla import installed_baseline
 from backup import BACKUP, LOCK, write_json, snapshot, finalize, restore, collect_cli_backups, collect_existing_settings, files, digest, protect_cli_backups
 
 SHARED = Path('/mnt/standalone')
-PREFIX = Path.home() / '.local/share/playlite/wine-steam-auto-crack'
+PREFIX = Path(os.environ.get('WINEPREFIX', str(Path.home() / '.local/share/playlite/wine-steam-auto-crack')))
 CLI = PREFIX / 'drive_c/SteamAutoCrackCLI'
-JOBS = Path.home() / '.local/state/playlite-autocrack/jobs'
+JOBS = Path(os.environ.get('PLAYLITE_AUTOCRACK_JOBS', str(Path.home() / '.local/state/playlite-autocrack/jobs')))
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
 
@@ -35,7 +35,7 @@ def game_path(value):
     path = Path(value)
     root = path.resolve()
     shared = SHARED.resolve()
-    if not os.path.ismount(SHARED):
+    if not os.path.ismount(SHARED) and not (os.environ.get('PLAYLITE_AUTOCRACK_CONTAINER')=='1' and os.path.ismount(root)):
         raise ValueError('The shared Steam library is not mounted.')
     if not path.is_absolute() or path.is_symlink() or not root.is_dir() or root == shared or not root.is_relative_to(shared):
         raise ValueError('Choose a game folder inside the VM shared Steam library.')
@@ -100,7 +100,7 @@ def run_cli(root, request, folder, check, status):
     config_path = 'Z:' + str(config).replace('/', '\\')
     env = os.environ.copy()
     env.update(WINEPREFIX=str(PREFIX), WINEARCH='win64', WINEDLLOVERRIDES='mshtml=',
-               WINEDEBUG='-all', DISPLAY=':0', XAUTHORITY=str(Path.home() / '.Xauthority'))
+               WINEDEBUG='-all', DISPLAY=os.environ.get('DISPLAY', ':0'), XAUTHORITY=os.environ.get('XAUTHORITY',str(Path.home() / '.Xauthority')))
     env.pop('DOTNET_ROOT', None)
     process = None
     complete, failed = False, False
@@ -235,7 +235,11 @@ def work(job):
                         if not (CLI / 'SteamAutoCrack.CLI.exe').is_file():
                             raise ValueError('Set up the VM CLI in SteamAutoCrack settings first.')
                         status('Reading the installed-build vanilla manifest…')
-                        baseline = installed_baseline(root, appid)
+                        if os.environ.get('PLAYLITE_AUTOCRACK_CONTAINER')=='1':
+                            baseline=json.loads(Path('/work/baseline.json').read_text())
+                            if str(baseline.get('AppId'))!=appid:raise ValueError('Installed baseline belongs to another Steam game.')
+                        else:
+                            baseline = installed_baseline(root, appid)
                         previous = root / BACKUP / 'manifest.json'
                         if previous.is_file():
                             saved_app = json.loads(previous.read_text()).get('AppId')

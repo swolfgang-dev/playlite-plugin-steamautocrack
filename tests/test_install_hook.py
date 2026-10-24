@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,9 @@ APP = QApplication.instance() or QApplication([])
 
 
 class InstallHookTests(unittest.TestCase):
+    def setUp(self):
+        backend=patch.dict(os.environ,{'PLAYLITE_STEAM_BACKEND':'vm'})
+        backend.start();self.addCleanup(backend.stop)
     def test_setup_cancels_on_shutdown_and_releases_pending_state(self):
         import autocrack_source.plugin as module
         tasks = []

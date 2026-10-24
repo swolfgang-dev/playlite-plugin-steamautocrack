@@ -110,12 +110,24 @@ def parse_vdf(source):
 def installed_baseline(root, appid, library=None):
     library = Path(library or Path.home() / '.steam/debian-installation')
     try:
-        state = parse_vdf((library / 'steamapps' / ('appmanifest_' + str(appid) + '.acf')).read_text())['AppState']
+        retained=root/'.playlite-depot-manifests'
+        record=retained/'installed.json'
+        if record.is_file():
+            import json
+            if record.is_symlink() or record.stat().st_size>1024*1024:raise ValueError('Invalid installed-build record.')
+            saved=json.loads(record.read_text())
+            depots=saved.get('Depots',{})
+            if not isinstance(depots,dict) or not 0<len(depots)<=256:raise ValueError('Invalid installed depot selection.')
+            state={'appid':str(saved.get('AppId')),'StateFlags':'4','InstalledDepots':{str(key):{'manifest':str(value)} for key,value in depots.items()}}
+            manifest_directory=retained
+        else:
+            state = parse_vdf((library / 'steamapps' / ('appmanifest_' + str(appid) + '.acf')).read_text())['AppState']
+            installed = library / 'steamapps/common' / state.get('installdir', '')
+            if installed.resolve() != root.resolve():
+                raise ValueError('The selected folder does not match this Steam installation.')
+            manifest_directory=library/'depotcache'
         if state.get('appid') != str(appid) or state.get('StateFlags') != '4':
             raise ValueError('Finish installing or verifying this game in Steam first.')
-        installed = library / 'steamapps/common' / state.get('installdir', '')
-        if installed.resolve() != root.resolve():
-            raise ValueError('The selected folder does not match this Steam installation.')
         depots = state.get('InstalledDepots', {})
         if not depots:
             raise ValueError('No installed Steam depot manifests are available.')
@@ -124,8 +136,8 @@ def installed_baseline(root, appid, library=None):
             manifest = info.get('manifest', '')
             if not depot.isdecimal() or not manifest.isdecimal():
                 raise ValueError('Invalid installed Steam depot identity.')
-            path = library / 'depotcache' / (depot + '_' + manifest + '.manifest')
-            if path.stat().st_size > 128 * 1024 * 1024:
+            path = manifest_directory / (depot + '_' + manifest + '.manifest')
+            if path.is_symlink() or path.stat().st_size > 128 * 1024 * 1024:
                 raise ValueError('Steam depot manifest exceeds limit.')
             for key, value in depot_files(path.read_bytes(), depot, manifest).items():
                 if key in result and result[key] != value:
@@ -163,4 +175,4 @@ def installed_baseline(root, appid, library=None):
             result[key] = selected
         return {'AppId': str(appid), 'BuildId': state.get('buildid'), 'Depots': identities, 'Files': result}
     except (OSError, KeyError) as error:
-        raise ValueError('Installed-build Steam manifests are unavailable. Install or verify the game in this Steam VM first. No new backup was created.') from error
+        raise ValueError('Installed-build Steam manifests are unavailable. Download with the updated Playlite worker or verify this game in Steam first. No new backup was created.') from error

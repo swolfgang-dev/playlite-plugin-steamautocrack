@@ -1,5 +1,48 @@
 # SteamAutoCrack for Playlite
 
+The default backend runs the pinned Windows SteamAutoCrack CLI in a private
+Wine container, without opening a VM or installing host Wine/.NET. Requires
+Playlite 0.2.88+, Steam Downloader 0.1.18+, Crack Tools 0.2.1+ and existing Docker
+access.
+
+## Container setup and use
+
+Open **Settings → Plugins → SteamAutoCrack → Set up CLI container…**. The image
+build reuses the checksum-verified Wine/.NET/application and CLI recipes. Build
+downloads use Docker's normal connection. Docker retains the resulting image,
+layers and build cache; temporary build context/source files are removed.
+
+Choose your emulator username, optional Steam Web API key, game-info options
+and timeout. No VM userdata folder is required. Online processing uses a separate
+NordVPN gateway built from the downloader's existing guarded network layer and
+saved service credentials. It does not interrupt active downloads. The CLI runs
+as the desktop UID so game-file ownership is retained; that UID is explicitly
+guarded by the tunnel-only firewall inside the private gateway. Offline runs use
+`--network none`. The host network/firewall, host Steam profile, Docker socket
+and unrelated game directories are not mounted into the processing container.
+
+Right-click a stopped Windows game and choose **SteamAutoCrack → Run**. Direct
+depot downloads must have installed-build manifests retained by the new worker:
+**rebuild the downloader worker once** after updating. Completed new downloads
+retain decrypted manifests and their exact installed depot IDs under
+`.playlite-depot-manifests`. These contain file metadata, not depot keys or login
+tokens. Existing Steam-library installations can use their local app/depot
+manifests. Games lacking a verified installed baseline remain blocked; filenames
+alone are never treated as proof of unmodified originals.
+
+Targeted verified backups, cancellation rollback, sequential batches and run on
+add are retained. **Restore originals** runs locally and supports existing VM
+and legacy backups, without a VM, CLI image or network connection. Only the
+selected game folder and a private temporary job/Wine-prefix directory are
+mounted writable. The prefix and request/API-key files are removed after each
+job; redacted activity logs remain in the usual Playlite job folder.
+
+## Legacy VM backend
+
+Set `PLAYLITE_STEAM_BACKEND=vm` to retain the old VM workflow. Existing VM data
+and credentials are not removed or migrated. The following instructions apply
+only to that backend.
+
 Process Windows games with the Windows SteamAutoCrack CLI inside the Steam
 Downloader VM. Playlite sends jobs through the QEMU guest agent; game files stay
 in the shared Steam library and are accessed as `S:\` inside Wine.

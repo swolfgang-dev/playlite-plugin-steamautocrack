@@ -1,4 +1,5 @@
 import getpass
+import os
 import re
 from pathlib import Path
 from PyQt6.QtWidgets import QCheckBox, QLineEdit, QDialog, QVBoxLayout, QLabel, QPushButton
@@ -6,6 +7,10 @@ from PyQt6.QtCore import QSettings, QThreadPool, Qt
 from playlite.providers import GenericPlugin
 from playlite.lifecycle import run_dialog, show_warning, choose_directory
 from .vm_backend import default_root
+
+
+def using_vm():
+    return os.environ.get('PLAYLITE_STEAM_BACKEND')=='vm'
 
 
 class Plugin(GenericPlugin):
@@ -50,7 +55,8 @@ class Plugin(GenericPlugin):
                 widget.vm_root.setText(value)
         browse.clicked.connect(pick)
         row.addWidget(browse)
-        form.addRow('Steam VM userdata', row)
+        if using_vm():form.addRow('Steam VM userdata', row)
+        else:widget.vm_root.hide()
         for field, key, title in [('achievements', 'generateAchievements', 'Generate Steam achievements'),
                                   ('stats', 'generateStats', 'Generate Steam stats'),
                                   ('dlc', 'generateDlc', 'Generate Steam DLC configuration')]:
@@ -61,19 +67,23 @@ class Plugin(GenericPlugin):
         widget.unpack = QCheckBox('Unpack SteamStub executables')
         widget.unpack.setChecked(settings.value('unpack', True, type=bool))
         form.addRow(widget.unpack)
-        setup = QPushButton('Set up / check VM CLI…')
+        setup = QPushButton('Set up / check VM CLI…' if using_vm() else 'Set up CLI container…')
         setup.clicked.connect(lambda: self.setup_vm(widget))
         form.addRow(setup)
-        description = QLabel('Runs the Windows SteamAutoCrack CLI through Wine in the Steam Downloader VM. '
+        description = QLabel(('Runs the Windows SteamAutoCrack CLI through Wine in the Steam Downloader VM. '
                              'Choose Windows games inside its shared Steam library. Original game files '
-                             'are backed up for restoration. Game-info requests use the VM VPN.')
+                             'are backed up for restoration. Game-info requests use the VM VPN.') if using_vm() else
+                            'Runs the Windows CLI in a private Wine container. No VM or host Wine is needed. '
+                            'Original targets are verified against installed depot manifests and backed up for restoration. '
+                            'Game-info requests use an isolated NordVPN connection; offline processing has no network access.')
         description.setWordWrap(True)
         form.addRow(description)
         return widget
 
     def setup_vm(self, widget):
         import threading
-        from .vm_backend import setup
+        if using_vm():from .vm_backend import setup
+        else:from .container_backend import setup
         from playlite.metadata_dialog import Task
         from PyQt6.QtCore import QObject, pyqtSignal
         class Updates(QObject):
@@ -81,10 +91,10 @@ class Plugin(GenericPlugin):
         cancel = threading.Event()
         installed = []
         dialog = QDialog(widget)
-        dialog.setWindowTitle('Set up SteamAutoCrack VM CLI')
+        dialog.setWindowTitle('Set up SteamAutoCrack CLI')
         dialog.setMinimumSize(640, 160)
         layout = QVBoxLayout(dialog)
-        label = QLabel('Preparing the Steam VM CLI…')
+        label = QLabel('Preparing the CLI…')
         label.setWordWrap(True)
         layout.addWidget(label)
         button = QPushButton('Cancel')
@@ -102,7 +112,7 @@ class Plugin(GenericPlugin):
             dialog.busy = False
             dialog.reject()
             if not cancel.is_set():
-                show_warning(widget, 'Steam VM CLI setup', error)
+                show_warning(widget, 'SteamAutoCrack CLI setup', error)
         task.bind(dialog, complete, failed)
         dialog.finished.connect(lambda: cancel.set())
         dialog.task = task
@@ -111,7 +121,7 @@ class Plugin(GenericPlugin):
         def shutdown():
             cancel.set()
             button.setEnabled(False)
-            label.setText('Cancelling VM CLI setup before closing Playlite…')
+            label.setText('Cancelling CLI setup before closing Playlite…')
         dialog.request_shutdown = shutdown
         QThreadPool.globalInstance().start(task)
         run_dialog(dialog)
@@ -124,7 +134,7 @@ class Plugin(GenericPlugin):
         if key and not re.fullmatch(r'[a-fA-F0-9]{32}', key):
             raise ValueError('Enter a valid Steam Web API key (32 hexadecimal characters), or leave it blank.')
         vm_root = widget.vm_root.text().strip()
-        if not Path(vm_root).is_absolute() or any(c in vm_root for c in '\r\n\0'):
+        if using_vm() and (not Path(vm_root).is_absolute() or any(c in vm_root for c in '\r\n\0')):
             raise ValueError('Select an absolute Steam VM userdata folder.')
         return vm_root
 
@@ -136,6 +146,7 @@ class Plugin(GenericPlugin):
                            ('generateAchievements', widget.achievements.isChecked()),
                            ('generateStats', widget.stats.isChecked()), ('generateDlc', widget.dlc.isChecked()),
                            ('unpack', widget.unpack.isChecked())]:
+            if key=='vmRoot' and not using_vm():continue
             settings.setValue(key, value)
         for obsolete in ('emulatorDirectory', 'unpackerPath'):
             settings.remove(obsolete)
@@ -187,18 +198,24 @@ class Plugin(GenericPlugin):
         info = any(options.values())
         if info and not re.fullmatch(r'[a-fA-F0-9]{32}', key):
             raise ValueError('Set a Steam Web API key, or disable game-info generation in plugin settings.')
-        from .vm_backend import Client, shared_game_path
         vm_root = settings.value('vmRoot', str(default_root()))
-        client = Client(vm_root)
-        shared_game_path(root, client.cfg['shared'])
+        if using_vm():
+            from .vm_backend import Client, shared_game_path
+            client = Client(vm_root)
+            shared_game_path(root, client.cfg['shared'])
+        else:
+            from .container_backend import game_path
+            game_path(root)
         return dict(InstallDirectory=str(root), AppId=str(appid), ApiKey=key if info else '', GenerateInfo=info,
                     **options, GenerateConfig=True, Unpack=settings.value('unpack', True, type=bool), ApplyEmulator=True,
                     VmRoot=vm_root, TimeoutMinutes=settings.value('timeout', 5, type=int),
+                    Backend='vm' if using_vm() else 'container',
                     GoldbergUsername=settings.value('username', getpass.getuser()))
 
     def restore_request(self, game):
         settings = self.settings()
         return dict(InstallDirectory=game['InstallDirectory'], Restore=True,
+                    Backend='vm' if using_vm() else 'container',
                     VmRoot=settings.value('vmRoot', str(default_root())),
                     TimeoutMinutes=settings.value('timeout', 5, type=int))
 
